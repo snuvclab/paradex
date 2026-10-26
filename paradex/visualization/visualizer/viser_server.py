@@ -18,7 +18,7 @@ import threading
 import time
 import traceback
 from pathlib import Path
-from typing import Any, Dict
+from typing import Any, Dict, Optional
 
 import numpy as np
 import trimesh
@@ -41,8 +41,9 @@ def _make_mesh(vertices, faces, vertex_colors=None) -> trimesh.Trimesh:
 class ViserServer:
     """Dispatches ZMQ messages to a ViserViewer running in this process."""
 
-    def __init__(self, vis: ViserViewer):
+    def __init__(self, vis: ViserViewer, max_mesh_faces: Optional[int] = 1000):
         self.vis = vis
+        self.max_mesh_faces = max_mesh_faces
         self._lock = threading.Lock()
 
     # ---- command handlers ------------------------------------------------
@@ -67,7 +68,10 @@ class ViserServer:
                     pass
                 del self.vis.obj_dict[name]
                 self.vis.frame_nodes.pop(name, None)
-            self.vis.add_object(name, mesh, pose, opacity=opacity)
+            self.vis.add_object(
+                name, mesh, pose, opacity=opacity,
+                max_mesh_faces=self.max_mesh_faces,
+            )
         return {"ok": True}
 
     def cmd_set_qpos(self, msg: Dict[str, Any]) -> Dict[str, Any]:
@@ -79,11 +83,64 @@ class ViserServer:
             self.vis.robot_dict[name].update_cfg(qpos)
         return {"ok": True}
 
+    @staticmethod
+    def _set_robot_visible(robot, visible: bool) -> None:
+        for attr in ("_visual_root_frame", "_collision_root_frame"):
+            frame = getattr(robot, attr, None)
+            if frame is not None:
+                frame.visible = bool(visible)
+
+    def _show_only_robot(self, name: str) -> Dict[str, Any]:
+        if name not in self.vis.robot_dict:
+            return {"ok": False, "msg": f"no robot named '{name}'"}
+        for robot_name, robot in self.vis.robot_dict.items():
+            self._set_robot_visible(robot, robot_name == name)
+        return {"ok": True}
+
+    def cmd_show_only_robot(self, msg: Dict[str, Any]) -> Dict[str, Any]:
+        name = str(msg.get("name", "robot"))
+        with self._lock:
+            return self._show_only_robot(name)
+
+    def cmd_set_static_robot(self, msg: Dict[str, Any]) -> Dict[str, Any]:
+        name = str(msg["name"])
+        urdf_path = str(Path(msg["urdf_path"]).expanduser())
+        pose = np.asarray(msg["pose"], dtype=np.float32)
+        qpos = np.asarray(msg["qpos"], dtype=np.float32)
+        if not Path(urdf_path).is_file():
+            return {"ok": False, "msg": f"robot URDF not found: {urdf_path}"}
+        if pose.shape != (4, 4):
+            return {"ok": False, "msg": f"robot pose must be 4x4, got {pose.shape}"}
+        with self._lock:
+            if name not in self.vis.robot_dict:
+                self.vis.add_robot(
+                    name,
+                    urdf_path,
+                    pose=pose,
+                    max_mesh_faces=self.max_mesh_faces,
+                )
+            robot = self.vis.robot_dict[name]
+            root = getattr(robot, "_visual_root_frame", None)
+            if root is not None:
+                from scipy.spatial.transform import Rotation
+
+                root.position = pose[:3, 3]
+                root.wxyz = Rotation.from_matrix(pose[:3, :3]).as_quat()[[3, 0, 1, 2]]
+            robot.update_cfg(qpos)
+            self._set_robot_visible(robot, True)
+            if bool(msg.get("show_only", False)):
+                self._show_only_robot(name)
+        return {"ok": True}
+
     def cmd_set_traj(self, msg: Dict[str, Any]) -> Dict[str, Any]:
         """Replace any existing trajectory with this one."""
         name = str(msg.get("name", "traj"))
         robot_name = str(msg.get("robot_name", "robot"))
         traj = np.asarray(msg["traj"], dtype=np.float32)
+        robot_pose_traj = {
+            str(key): np.asarray(value, dtype=np.float32)
+            for key, value in msg.get("robot_pose_traj", {}).items()
+        }
         with self._lock:
             # Reset trajectory state then add fresh.
             self.vis.traj_list = []
@@ -93,7 +150,11 @@ class ViserServer:
                 self.vis.gui_timestep.value = 0
             except Exception:
                 pass
-            self.vis.add_traj(name, robot_traj={robot_name: traj})
+            self.vis.add_traj(
+                name,
+                robot_traj={robot_name: traj},
+                robot_pose_traj=robot_pose_traj,
+            )
         return {"ok": True, "n_frames": int(traj.shape[0])}
 
     def cmd_clear_objects(self, _msg: Dict[str, Any]) -> Dict[str, Any]:
@@ -121,6 +182,8 @@ class ViserServer:
             "ping": self.cmd_ping,
             "set_object": self.cmd_set_object,
             "set_qpos": self.cmd_set_qpos,
+            "set_static_robot": self.cmd_set_static_robot,
+            "show_only_robot": self.cmd_show_only_robot,
             "set_traj": self.cmd_set_traj,
             "clear_objects": self.cmd_clear_objects,
         }
@@ -163,6 +226,8 @@ def main():
     ap.add_argument("--robot_name", default="robot")
     ap.add_argument("--addr", default="tcp://*:5572")
     ap.add_argument("--update_hz", type=float, default=30.0)
+    ap.add_argument("--max_mesh_faces", type=int, default=1000,
+                    help="per-mesh face budget for viewer rendering; 0 disables simplification")
     args = ap.parse_args()
 
     urdf = str(Path(args.robot_urdf).expanduser())
@@ -171,11 +236,12 @@ def main():
 
     vis = ViserViewer()
     vis.add_floor(height=0.0)
-    vis.add_robot(args.robot_name, urdf)
+    max_mesh_faces = args.max_mesh_faces if args.max_mesh_faces > 0 else None
+    vis.add_robot(args.robot_name, urdf, max_mesh_faces=max_mesh_faces)
     print(f"[viser_server] loaded robot '{args.robot_name}' from {urdf}")
 
     threading.Thread(target=_update_loop, args=(vis, args.update_hz), daemon=True).start()
-    ViserServer(vis).serve(args.addr)
+    ViserServer(vis, max_mesh_faces=max_mesh_faces).serve(args.addr)
 
 
 if __name__ == "__main__":

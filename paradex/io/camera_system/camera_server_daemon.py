@@ -6,9 +6,10 @@ import threading
 import time
 import traceback
 import json
+import struct
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import Callable, Optional
-from urllib.parse import unquote, urlparse
+from urllib.parse import parse_qs, unquote, urlparse
 
 import zmq
 
@@ -87,6 +88,54 @@ class camera_server_daemon:
 
             def do_GET(self):
                 path = urlparse(self.path).path
+                if path.startswith("/stream/"):
+                    try:
+                        max_fps = float(parse_qs(urlparse(self.path).query).get("max_fps", ["30"])[0])
+                        if not 0 < max_fps <= 30:
+                            raise ValueError("out of range")
+                    except (ValueError, TypeError):
+                        self._send_json(400, {"error": "max_fps must be in (0, 30]"})
+                        return
+                    interval = 1.0 / max_fps
+                    next_send = 0.0
+                    # Experimental cached-JPEG push; snapshot API stays unchanged.
+                    # PySpin re-encodes per get_frame call and is not supported here.
+                    if not daemon._uses_aravis_backend():
+                        self._send_json(409, {"error": "stream requires cached Aravis JPEGs"})
+                        return
+                    serial = unquote(path[len("/stream/") :])
+                    get_frame = getattr(daemon.camera_loader, "get_frame", None)
+                    frame = get_frame(serial) if get_frame is not None else None
+                    if frame is None:
+                        self._send_json(404, {"error": "frame unavailable", "serial": serial})
+                        return
+                    self.connection.settimeout(2.0)
+                    self.send_response(200)
+                    self.send_header("Content-Type", "application/octet-stream")
+                    self.send_header("X-Stream-Format", "frame-id:u64,send-monotonic-ns:u64,jpeg-size:u32;network-order")
+                    self.send_header("Cache-Control", "no-store")
+                    self.end_headers()
+                    previous = None
+                    try:
+                        while not daemon._shutdown_event.is_set():
+                            remaining = next_send - time.monotonic()
+                            if remaining > 0:
+                                daemon._shutdown_event.wait(min(remaining, 0.05))
+                                continue
+                            frame = get_frame(serial)
+                            if frame is not None and frame[0] != previous:
+                                frame_id, jpeg = frame
+                                self.wfile.write(struct.pack("!QQI", int(frame_id), time.monotonic_ns(), len(jpeg)))
+                                self.wfile.write(jpeg)
+                                previous = frame_id
+                                next_send = time.monotonic() + interval
+                            else:
+                                daemon._shutdown_event.wait(0.002)
+                    except (OSError, TimeoutError):
+                        # Disconnected/slow clients must not block camera capture.
+                        pass
+                    self.close_connection = True
+                    return
                 if path == "/cameras":
                     self._send_json(
                         200,

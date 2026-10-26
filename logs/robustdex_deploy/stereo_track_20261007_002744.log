@@ -1,0 +1,297 @@
+Local four-pair Cutie=cuda:0; stereo tensor batch=1 x4
+GPU placement: fast-foundation-trt=cuda:1, SAM3=cuda:1 (shared GPU)
+Keep the object stationary until Ready: initializing the four-pair reference...
+Latest calibration: /home/temp_id/shared_data/cam_param/20261002_130739
+Stereo backend: {'backend': 'fast-foundation-trt', 'fast_root': 'output/stereo_tracking/optimization_ab_20260922/assets/Fast-FoundationStereo', 'iters': 4, 'max_disp': 192, 'size': [672, 448], 'device': 1, 'engine_dir': 'output/stereo_tracking/fast_trt_ab_20260923/twostage_trt103', 'cuda_graph': False}
+Processing 1/4: 23180202/22645021
+Processing 2/4: 23263780/22684755
+Processing 3/4: 22645026/22645029
+Processing 4/4: 25452066/26256735
+Saved 499917 points to /home/temp_id/paradex/output/stereo_tracking/20261007_002744_825302/initial_stereo
+Extracting initial object with SAM3 prompt='pringles' on cuda:1...
+Robot frame: inverse of C2R /home/temp_id/shared_data/handeye_calibration/20261002_130739/0/C2R.npy
+Loading SAM3 from /home/temp_id/.cache/huggingface/hub/models--facebook--sam3/snapshots/3c879f39826c281e95690f02c7821c4de09afae7/sam3.pt on cuda:1; prompt='pringles'
+Pair 1: 1 candidates, score=0.8984375, 5307 object points
+Pair 2: 1 candidates, score=0.90234375, 9410 object points
+Pair 3: 2 candidates, score=0.61328125, 5726 object points
+Pair 4: 0 candidates, score=None, 0 object points
+Saved 20443 object points: /home/temp_id/paradex/output/stereo_tracking/20261007_002744_825302/initial_object
+Robot frame: inverse of C2R output/stereo_tracking/20261007_002744_825302/initial_object/C2R.npy
+WARNING: HTTP stereo exposures are not synchronized; slow-motion prototype only.
+Assuming one rigid target instance; ICP is local and cannot guarantee identity or recover large jumps.
+╭──────────────── viser ────────────────╮
+│             ╷                         │
+│   HTTP      │ http://127.0.0.1:8080   │
+│   Websocket │ ws://127.0.0.1:8080     │
+│             ╵                         │
+╰───────────────────────────────────────╯
+[robustdex] publishing object cloud on tcp://127.0.0.1:5571
+Grasp robot URDF: /home/temp_id/shared_data/capture/eccv2026/v0/assets/robots/allegro_v5/xarm_allegro_v5_mount_v2.urdf
+/home/temp_id/paradex/external/Cutie/cutie/utils/tensor_utils.py:48: FutureWarning: `torch.cuda.amp.autocast(args...)` is deprecated. Please use `torch.amp.autocast('cuda', args...)` instead.
+  with torch.cuda.amp.autocast(enabled=False):
+/home/temp_id/paradex/external/Cutie/cutie/model/modules.py:79: FutureWarning: `torch.cuda.amp.autocast(args...)` is deprecated. Please use `torch.amp.autocast('cuda', args...)` instead.
+  with torch.cuda.amp.autocast(enabled=False):
+/home/temp_id/paradex/external/Cutie/cutie/model/transformer/object_summarizer.py:78: FutureWarning: `torch.cuda.amp.autocast(args...)` is deprecated. Please use `torch.amp.autocast('cuda', args...)` instead.
+  with torch.cuda.amp.autocast(enabled=False):
+[preview] robot mesh simplified: 531501 -> 43550 faces (max 1000 per link)
+Local pair 1: SAM3 seed=5660 px, candidates=1
+Local pair 2: SAM3 seed=9904 px, candidates=1
+Local pair 3: SAM3 seed=6148 px, candidates=2
+Local pair 4: SAM3 seed=0 px, candidates=0
+Ready; initialization 54.98s. Keep initial capture stationary; tracking now active.
+/home/temp_id/paradex/external/Cutie/cutie/utils/tensor_utils.py:48: FutureWarning: `torch.cuda.amp.autocast(args...)` is deprecated. Please use `torch.amp.autocast('cuda', args...)` instead.
+  with torch.cuda.amp.autocast(enabled=False):
+/home/temp_id/paradex/external/Cutie/cutie/model/big_modules.py:289: FutureWarning: `torch.cuda.amp.autocast(args...)` is deprecated. Please use `torch.amp.autocast('cuda', args...)` instead.
+  with torch.cuda.amp.autocast(enabled=False):
+/home/temp_id/paradex/external/Cutie/cutie/model/modules.py:62: FutureWarning: `torch.cuda.amp.autocast(args...)` is deprecated. Please use `torch.amp.autocast('cuda', args...)` instead.
+  with torch.cuda.amp.autocast(enabled=False):
+frame 0: tracked, points=14788, model=6000, fitness=0.998, rmse=1.47 mm, fusion=integrated, views=2/4, total=3499.2 ms
+frame 1: tracked, points=14785, model=6000, fitness=0.998, rmse=1.39 mm, fusion=keyframe_interval, views=2/4, total=122.4 ms
+frame 2: tracked, points=14792, model=6000, fitness=0.998, rmse=1.45 mm, fusion=keyframe_interval, views=2/4, total=132.9 ms
+frame 3: tracked, points=14795, model=6000, fitness=0.999, rmse=1.41 mm, fusion=integrated, views=2/4, total=159.6 ms
+/home/temp_id/paradex/external/Cutie/cutie/model/modules.py:79: FutureWarning: `torch.cuda.amp.autocast(args...)` is deprecated. Please use `torch.amp.autocast('cuda', args...)` instead.
+  with torch.cuda.amp.autocast(enabled=False):
+/home/temp_id/paradex/external/Cutie/cutie/model/transformer/object_summarizer.py:78: FutureWarning: `torch.cuda.amp.autocast(args...)` is deprecated. Please use `torch.amp.autocast('cuda', args...)` instead.
+  with torch.cuda.amp.autocast(enabled=False):
+frame 4: tracked, points=14786, model=6000, fitness=0.999, rmse=1.47 mm, fusion=keyframe_interval, views=2/4, total=121.0 ms
+frame 5: tracked, points=14808, model=6000, fitness=0.998, rmse=1.38 mm, fusion=keyframe_interval, views=2/4, total=482.3 ms
+frame 6: tracked, points=14816, model=6000, fitness=0.999, rmse=1.41 mm, fusion=integrated, views=2/4, total=176.9 ms
+frame 7: tracked, points=14811, model=6000, fitness=0.999, rmse=1.43 mm, fusion=keyframe_interval, views=2/4, total=127.7 ms
+frame 8: tracked, points=14804, model=6000, fitness=0.999, rmse=1.44 mm, fusion=keyframe_interval, views=2/4, total=118.7 ms
+frame 9: tracked, points=14809, model=6000, fitness=0.999, rmse=1.40 mm, fusion=integrated, views=2/4, total=176.4 ms
+frame 10: tracked, points=14821, model=6000, fitness=0.999, rmse=1.45 mm, fusion=keyframe_interval, views=2/4, total=996.8 ms
+frame 11: tracked, points=14813, model=6000, fitness=0.999, rmse=1.44 mm, fusion=keyframe_interval, views=2/4, total=141.3 ms
+frame 12: tracked, points=14809, model=6000, fitness=0.999, rmse=1.47 mm, fusion=integrated, views=2/4, total=261.6 ms
+frame 13: tracked, points=14812, model=6000, fitness=0.999, rmse=1.42 mm, fusion=keyframe_interval, views=2/4, total=147.5 ms
+frame 14: tracked, points=14813, model=6000, fitness=0.998, rmse=1.46 mm, fusion=keyframe_interval, views=2/4, total=195.5 ms
+(viser) Connection opened (0, 1 total), 353 persistent messages
+frame 15: tracked, points=14815, model=6000, fitness=0.999, rmse=1.43 mm, fusion=integrated, views=2/4, total=634.2 ms
+frame 16: tracked, points=14825, model=6000, fitness=0.999, rmse=1.44 mm, fusion=keyframe_interval, views=2/4, total=145.3 ms
+frame 17: tracked, points=14823, model=6000, fitness=0.998, rmse=1.44 mm, fusion=keyframe_interval, views=2/4, total=145.6 ms
+frame 18: tracked, points=14818, model=6000, fitness=0.999, rmse=1.44 mm, fusion=integrated, views=2/4, total=182.1 ms
+frame 19: tracked, points=14814, model=6000, fitness=0.999, rmse=1.40 mm, fusion=keyframe_interval, views=2/4, total=121.8 ms
+frame 20: tracked, points=14824, model=6000, fitness=0.999, rmse=1.41 mm, fusion=keyframe_interval, views=2/4, total=431.3 ms
+frame 21: tracked, points=14823, model=6000, fitness=0.999, rmse=1.41 mm, fusion=integrated, views=2/4, total=171.8 ms
+frame 22: tracked, points=14816, model=6000, fitness=0.999, rmse=1.37 mm, fusion=keyframe_interval, views=2/4, total=137.4 ms
+frame 23: tracked, points=14823, model=6000, fitness=0.998, rmse=1.38 mm, fusion=keyframe_interval, views=2/4, total=131.0 ms
+frame 24: tracked, points=14814, model=6000, fitness=0.998, rmse=1.38 mm, fusion=integrated, views=2/4, total=184.7 ms
+frame 25: tracked, points=14825, model=6000, fitness=0.999, rmse=1.40 mm, fusion=keyframe_interval, views=2/4, total=457.0 ms
+frame 26: tracked, points=14815, model=6000, fitness=0.999, rmse=1.44 mm, fusion=keyframe_interval, views=2/4, total=143.2 ms
+frame 27: tracked, points=14819, model=6000, fitness=0.999, rmse=1.37 mm, fusion=integrated, views=2/4, total=189.5 ms
+frame 28: tracked, points=14823, model=6000, fitness=0.997, rmse=1.44 mm, fusion=keyframe_interval, views=2/4, total=132.3 ms
+frame 29: tracked, points=14825, model=6000, fitness=0.999, rmse=1.36 mm, fusion=keyframe_interval, views=2/4, total=124.4 ms
+frame 30: tracked, points=14827, model=6000, fitness=0.999, rmse=1.37 mm, fusion=integrated, views=2/4, total=492.9 ms
+frame 31: tracked, points=14825, model=6000, fitness=0.999, rmse=1.42 mm, fusion=keyframe_interval, views=2/4, total=146.0 ms
+frame 32: tracked, points=14828, model=6000, fitness=0.999, rmse=1.41 mm, fusion=keyframe_interval, views=2/4, total=124.1 ms
+frame 33: tracked, points=14823, model=6000, fitness=0.999, rmse=1.41 mm, fusion=integrated, views=2/4, total=183.5 ms
+frame 34: tracked, points=14823, model=6000, fitness=0.998, rmse=1.40 mm, fusion=keyframe_interval, views=2/4, total=126.4 ms
+frame 35: tracked, points=14832, model=6000, fitness=0.999, rmse=1.39 mm, fusion=keyframe_interval, views=2/4, total=438.9 ms
+frame 36: tracked, points=14825, model=6000, fitness=0.999, rmse=1.39 mm, fusion=integrated, views=2/4, total=178.4 ms
+frame 37: tracked, points=14825, model=6000, fitness=1.000, rmse=1.39 mm, fusion=keyframe_interval, views=2/4, total=148.6 ms
+frame 38: tracked, points=14819, model=6000, fitness=0.999, rmse=1.39 mm, fusion=keyframe_interval, views=2/4, total=129.0 ms
+frame 39: tracked, points=14830, model=6000, fitness=0.999, rmse=1.40 mm, fusion=integrated, views=2/4, total=175.5 ms
+frame 40: tracked, points=14831, model=6000, fitness=0.998, rmse=1.38 mm, fusion=keyframe_interval, views=2/4, total=437.9 ms
+frame 41: tracked, points=14829, model=6000, fitness=0.999, rmse=1.41 mm, fusion=keyframe_interval, views=2/4, total=119.2 ms
+frame 42: tracked, points=14828, model=6000, fitness=0.999, rmse=1.38 mm, fusion=integrated, views=2/4, total=178.6 ms
+frame 43: tracked, points=14823, model=6000, fitness=0.999, rmse=1.38 mm, fusion=keyframe_interval, views=2/4, total=123.3 ms
+frame 44: tracked, points=14819, model=6000, fitness=0.999, rmse=1.45 mm, fusion=keyframe_interval, views=2/4, total=124.7 ms
+frame 45: tracked, points=14832, model=6000, fitness=1.000, rmse=1.38 mm, fusion=integrated, views=2/4, total=490.3 ms
+frame 46: tracked, points=14828, model=6000, fitness=0.999, rmse=1.42 mm, fusion=keyframe_interval, views=2/4, total=123.2 ms
+frame 47: tracked, points=14834, model=6000, fitness=0.999, rmse=1.45 mm, fusion=keyframe_interval, views=2/4, total=125.2 ms
+frame 48: tracked, points=14826, model=6000, fitness=0.999, rmse=1.48 mm, fusion=integrated, views=2/4, total=182.4 ms
+frame 49: tracked, points=14832, model=6000, fitness=1.000, rmse=1.41 mm, fusion=keyframe_interval, views=2/4, total=122.4 ms
+frame 50: tracked, points=14831, model=6000, fitness=1.000, rmse=1.41 mm, fusion=keyframe_interval, views=2/4, total=436.4 ms
+frame 51: tracked, points=14837, model=6000, fitness=0.999, rmse=1.45 mm, fusion=integrated, views=2/4, total=179.3 ms
+frame 52: tracked, points=14826, model=6000, fitness=0.999, rmse=1.38 mm, fusion=keyframe_interval, views=2/4, total=130.1 ms
+frame 53: tracked, points=14833, model=6000, fitness=0.999, rmse=1.41 mm, fusion=keyframe_interval, views=2/4, total=147.7 ms
+frame 54: tracked, points=14831, model=6000, fitness=0.999, rmse=1.41 mm, fusion=integrated, views=2/4, total=208.6 ms
+frame 55: tracked, points=14832, model=6000, fitness=0.999, rmse=1.40 mm, fusion=keyframe_interval, views=2/4, total=439.4 ms
+frame 56: tracked, points=14833, model=6000, fitness=1.000, rmse=1.42 mm, fusion=keyframe_interval, views=2/4, total=149.5 ms
+frame 57: tracked, points=14833, model=6000, fitness=0.999, rmse=1.44 mm, fusion=integrated, views=2/4, total=289.2 ms
+frame 58: tracked, points=14830, model=6000, fitness=0.999, rmse=1.44 mm, fusion=keyframe_interval, views=2/4, total=153.9 ms
+frame 59: tracked, points=14833, model=6000, fitness=0.999, rmse=1.41 mm, fusion=keyframe_interval, views=2/4, total=125.8 ms
+frame 60: tracked, points=14839, model=6000, fitness=0.999, rmse=1.44 mm, fusion=integrated, views=2/4, total=605.7 ms
+frame 61: tracked, points=14837, model=6000, fitness=1.000, rmse=1.43 mm, fusion=keyframe_interval, views=2/4, total=156.5 ms
+frame 62: tracked, points=14834, model=6000, fitness=0.999, rmse=1.44 mm, fusion=keyframe_interval, views=2/4, total=181.5 ms
+frame 63: tracked, points=14837, model=6000, fitness=1.000, rmse=1.46 mm, fusion=integrated, views=2/4, total=186.8 ms
+frame 64: tracked, points=14835, model=6000, fitness=0.999, rmse=1.41 mm, fusion=keyframe_interval, views=2/4, total=123.7 ms
+frame 65: tracked, points=14840, model=6000, fitness=0.999, rmse=1.41 mm, fusion=keyframe_interval, views=2/4, total=497.0 ms
+frame 66: tracked, points=14834, model=6000, fitness=1.000, rmse=1.41 mm, fusion=integrated, views=2/4, total=269.3 ms
+frame 67: tracked, points=14835, model=6000, fitness=1.000, rmse=1.42 mm, fusion=keyframe_interval, views=2/4, total=149.8 ms
+frame 68: tracked, points=14833, model=6000, fitness=0.999, rmse=1.43 mm, fusion=keyframe_interval, views=2/4, total=140.0 ms
+frame 69: tracked, points=14837, model=6000, fitness=1.000, rmse=1.43 mm, fusion=integrated, views=2/4, total=264.6 ms
+frame 70: tracked, points=14829, model=6000, fitness=0.999, rmse=1.43 mm, fusion=keyframe_interval, views=2/4, total=511.3 ms
+frame 71: tracked, points=14837, model=6000, fitness=1.000, rmse=1.41 mm, fusion=keyframe_interval, views=2/4, total=201.5 ms
+frame 72: tracked, points=14829, model=6000, fitness=0.999, rmse=1.42 mm, fusion=integrated, views=2/4, total=308.2 ms
+frame 73: tracked, points=14838, model=6000, fitness=0.999, rmse=1.41 mm, fusion=keyframe_interval, views=2/4, total=173.6 ms
+frame 74: tracked, points=14836, model=6000, fitness=1.000, rmse=1.45 mm, fusion=keyframe_interval, views=2/4, total=148.7 ms
+frame 75: tracked, points=14837, model=6000, fitness=0.999, rmse=1.46 mm, fusion=integrated, views=2/4, total=706.1 ms
+frame 76: tracked, points=14839, model=6000, fitness=1.000, rmse=1.48 mm, fusion=keyframe_interval, views=2/4, total=153.7 ms
+frame 77: tracked, points=14842, model=6000, fitness=1.000, rmse=1.49 mm, fusion=keyframe_interval, views=2/4, total=148.3 ms
+frame 78: tracked, points=14834, model=6000, fitness=0.999, rmse=1.54 mm, fusion=integrated, views=2/4, total=238.7 ms
+frame 79: tracked, points=14836, model=6000, fitness=0.999, rmse=1.51 mm, fusion=keyframe_interval, views=2/4, total=176.8 ms
+frame 80: tracked, points=14840, model=6000, fitness=1.000, rmse=1.46 mm, fusion=keyframe_interval, views=2/4, total=522.7 ms
+frame 81: tracked, points=14849, model=6000, fitness=0.999, rmse=1.45 mm, fusion=integrated, views=2/4, total=188.6 ms
+frame 82: tracked, points=14854, model=6000, fitness=0.999, rmse=1.48 mm, fusion=keyframe_interval, views=2/4, total=207.0 ms
+frame 83: tracked, points=14857, model=6000, fitness=0.999, rmse=1.50 mm, fusion=keyframe_interval, views=2/4, total=126.2 ms
+frame 84: tracked, points=14856, model=6000, fitness=0.999, rmse=1.48 mm, fusion=integrated, views=2/4, total=292.9 ms
+frame 85: tracked, points=14864, model=6000, fitness=0.998, rmse=1.50 mm, fusion=keyframe_interval, views=2/4, total=533.5 ms
+frame 86: tracked, points=14880, model=6000, fitness=0.997, rmse=1.59 mm, fusion=keyframe_interval, views=2/4, total=163.4 ms
+frame 87: tracked, points=14893, model=6000, fitness=0.994, rmse=1.58 mm, fusion=integrated, views=2/4, total=325.1 ms
+frame 88: tracked, points=14888, model=6000, fitness=0.994, rmse=1.62 mm, fusion=keyframe_interval, views=2/4, total=241.4 ms
+frame 89: tracked, points=14894, model=6000, fitness=0.992, rmse=1.66 mm, fusion=keyframe_interval, views=2/4, total=159.6 ms
+frame 90: tracked, points=14911, model=6000, fitness=0.987, rmse=1.70 mm, fusion=integrated, views=2/4, total=579.0 ms
+frame 91: tracked, points=14910, model=6000, fitness=0.980, rmse=1.72 mm, fusion=keyframe_interval, views=2/4, total=185.8 ms
+frame 92: tracked, points=14696, model=6000, fitness=0.992, rmse=1.72 mm, fusion=keyframe_interval, views=2/4, total=143.4 ms
+frame 93: tracked, points=14342, model=6000, fitness=0.986, rmse=1.76 mm, fusion=integrated, views=2/4, total=235.5 ms
+frame 94: tracked, points=13914, model=6000, fitness=0.988, rmse=1.71 mm, fusion=keyframe_interval, views=2/4, total=173.8 ms
+frame 95: tracked, points=13627, model=6000, fitness=0.987, rmse=1.58 mm, fusion=keyframe_interval, views=2/4, total=600.2 ms
+frame 96: tracked, points=13283, model=6000, fitness=0.989, rmse=1.62 mm, fusion=integrated, views=2/4, total=298.3 ms
+frame 97: tracked, points=13088, model=6000, fitness=0.999, rmse=1.61 mm, fusion=keyframe_interval, views=2/4, total=191.6 ms
+frame 98: tracked, points=13084, model=6000, fitness=0.996, rmse=1.58 mm, fusion=keyframe_interval, views=2/4, total=166.7 ms
+frame 99: tracked, points=13082, model=6000, fitness=0.999, rmse=1.59 mm, fusion=integrated, views=2/4, total=233.3 ms
+frame 100: tracked, points=13059, model=6000, fitness=0.999, rmse=1.56 mm, fusion=keyframe_interval, views=2/4, total=530.1 ms
+frame 101: tracked, points=13048, model=6000, fitness=1.000, rmse=1.65 mm, fusion=keyframe_interval, views=2/4, total=165.7 ms
+frame 102: tracked, points=13062, model=6000, fitness=0.999, rmse=1.62 mm, fusion=integrated, views=2/4, total=321.2 ms
+frame 103: tracked, points=13081, model=6000, fitness=0.999, rmse=1.60 mm, fusion=keyframe_interval, views=2/4, total=154.5 ms
+frame 104: tracked, points=13080, model=6000, fitness=1.000, rmse=1.54 mm, fusion=keyframe_interval, views=2/4, total=131.4 ms
+frame 105: tracked, points=13075, model=6000, fitness=1.000, rmse=1.60 mm, fusion=integrated, views=3/4, total=671.4 ms
+frame 106: tracked, points=13055, model=6000, fitness=0.999, rmse=1.62 mm, fusion=keyframe_interval, views=3/4, total=179.3 ms
+frame 107: tracked, points=13066, model=6000, fitness=0.997, rmse=1.95 mm, fusion=keyframe_interval, views=3/4, total=208.6 ms
+frame 108: tracked, points=13061, model=6000, fitness=0.994, rmse=1.79 mm, fusion=integrated, views=3/4, total=315.2 ms
+frame 109: tracked, points=13052, model=6000, fitness=0.999, rmse=1.83 mm, fusion=keyframe_interval, views=3/4, total=232.7 ms
+frame 110: tracked, points=13029, model=6000, fitness=0.997, rmse=1.81 mm, fusion=keyframe_interval, views=3/4, total=440.8 ms
+frame 111: tracked, points=12983, model=6000, fitness=0.998, rmse=1.67 mm, fusion=integrated, views=3/4, total=266.7 ms
+frame 112: tracked, points=12844, model=6000, fitness=0.998, rmse=1.94 mm, fusion=keyframe_interval, views=3/4, total=227.7 ms
+frame 113: tracked, points=12778, model=6000, fitness=0.996, rmse=1.86 mm, fusion=keyframe_interval, views=3/4, total=183.9 ms
+frame 114: tracked, points=12747, model=6000, fitness=0.995, rmse=1.89 mm, fusion=integrated, views=3/4, total=298.0 ms
+frame 115: tracked, points=12820, model=6000, fitness=0.994, rmse=1.85 mm, fusion=keyframe_interval, views=3/4, total=418.9 ms
+frame 116: tracked, points=12797, model=6000, fitness=0.997, rmse=1.78 mm, fusion=keyframe_interval, views=3/4, total=228.7 ms
+frame 117: tracked, points=12691, model=6000, fitness=0.954, rmse=2.70 mm, fusion=integrated, views=3/4, total=270.4 ms
+frame 118: tracked, points=12592, model=6000, fitness=0.991, rmse=1.97 mm, fusion=keyframe_interval, views=3/4, total=239.1 ms
+frame 119: tracked, points=12587, model=6000, fitness=0.987, rmse=2.03 mm, fusion=keyframe_interval, views=3/4, total=197.2 ms
+frame 120: tracked, points=12599, model=6000, fitness=0.987, rmse=1.99 mm, fusion=integrated, views=3/4, total=522.6 ms
+frame 121: tracked, points=12593, model=6000, fitness=0.991, rmse=1.87 mm, fusion=keyframe_interval, views=3/4, total=154.5 ms
+frame 122: tracked, points=12564, model=6000, fitness=0.994, rmse=2.00 mm, fusion=keyframe_interval, views=3/4, total=204.6 ms
+frame 123: tracked, points=12559, model=6000, fitness=0.996, rmse=1.91 mm, fusion=integrated, views=3/4, total=302.6 ms
+frame 124: tracked, points=12562, model=6000, fitness=0.998, rmse=1.99 mm, fusion=keyframe_interval, views=3/4, total=137.9 ms
+frame 125: tracked, points=12550, model=6000, fitness=0.997, rmse=1.95 mm, fusion=keyframe_interval, views=3/4, total=361.6 ms
+frame 126: tracked, points=12558, model=6000, fitness=0.997, rmse=1.96 mm, fusion=integrated, views=3/4, total=297.1 ms
+frame 127: tracked, points=12553, model=6000, fitness=0.997, rmse=1.98 mm, fusion=keyframe_interval, views=3/4, total=198.7 ms
+frame 128: tracked, points=12564, model=6000, fitness=0.998, rmse=1.95 mm, fusion=keyframe_interval, views=3/4, total=158.1 ms
+frame 129: tracked, points=12558, model=6000, fitness=0.998, rmse=1.93 mm, fusion=integrated, views=3/4, total=192.9 ms
+frame 130: tracked, points=12553, model=6000, fitness=0.998, rmse=1.97 mm, fusion=keyframe_interval, views=3/4, total=316.6 ms
+frame 131: tracked, points=12551, model=6000, fitness=0.997, rmse=1.93 mm, fusion=keyframe_interval, views=3/4, total=126.4 ms
+frame 132: tracked, points=12561, model=6000, fitness=0.999, rmse=1.90 mm, fusion=integrated, views=3/4, total=190.9 ms
+frame 133: tracked, points=12556, model=6000, fitness=0.999, rmse=1.90 mm, fusion=keyframe_interval, views=3/4, total=147.5 ms
+frame 134: tracked, points=12566, model=6000, fitness=0.999, rmse=1.92 mm, fusion=keyframe_interval, views=3/4, total=162.2 ms
+frame 135: tracked, points=12548, model=6000, fitness=0.998, rmse=1.86 mm, fusion=integrated, views=3/4, total=440.9 ms
+frame 136: tracked, points=12544, model=6000, fitness=0.999, rmse=1.85 mm, fusion=keyframe_interval, views=3/4, total=167.2 ms
+frame 137: tracked, points=12567, model=6000, fitness=0.999, rmse=1.82 mm, fusion=keyframe_interval, views=3/4, total=153.0 ms
+frame 138: tracked, points=12556, model=6000, fitness=0.999, rmse=1.80 mm, fusion=integrated, views=3/4, total=275.8 ms
+frame 139: tracked, points=12563, model=6000, fitness=0.999, rmse=1.80 mm, fusion=keyframe_interval, views=3/4, total=147.7 ms
+frame 140: tracked, points=12556, model=6000, fitness=0.999, rmse=1.77 mm, fusion=keyframe_interval, views=3/4, total=365.9 ms
+frame 141: tracked, points=12552, model=6000, fitness=0.999, rmse=1.82 mm, fusion=integrated, views=3/4, total=307.9 ms
+frame 142: tracked, points=12645, model=6000, fitness=0.985, rmse=1.88 mm, fusion=keyframe_interval, views=3/4, total=143.4 ms
+frame 143: tracked, points=12665, model=6000, fitness=0.979, rmse=2.03 mm, fusion=keyframe_interval, views=3/4, total=153.2 ms
+frame 144: tracked, points=12643, model=6000, fitness=0.983, rmse=2.08 mm, fusion=integrated, views=3/4, total=301.3 ms
+frame 145: tracked, points=12667, model=6000, fitness=0.957, rmse=2.18 mm, fusion=keyframe_interval, views=3/4, total=398.3 ms
+frame 146: tracked, points=12644, model=6000, fitness=0.982, rmse=1.97 mm, fusion=keyframe_interval, views=3/4, total=238.7 ms
+frame 147: tracked, points=12743, model=6000, fitness=0.933, rmse=2.53 mm, fusion=integrated, views=3/4, total=309.6 ms
+frame 148: tracked, points=12703, model=6000, fitness=0.990, rmse=2.09 mm, fusion=keyframe_interval, views=3/4, total=187.8 ms
+frame 149: tracked, points=12804, model=6000, fitness=0.930, rmse=2.30 mm, fusion=keyframe_interval, views=3/4, total=336.9 ms
+frame 150: tracked, points=12767, model=6000, fitness=0.984, rmse=2.05 mm, fusion=integrated, views=3/4, total=493.4 ms
+frame 151: tracked, points=12933, model=6000, fitness=0.975, rmse=2.09 mm, fusion=keyframe_interval, views=3/4, total=232.6 ms
+frame 152: tracked, points=12863, model=6000, fitness=0.591, rmse=2.67 mm, fusion=keyframe_interval, views=3/4, total=239.5 ms
+frame 153: tracked, points=12928, model=6000, fitness=0.959, rmse=2.05 mm, fusion=integrated, views=3/4, total=304.9 ms
+frame 154: tracked, points=13004, model=6000, fitness=0.958, rmse=2.11 mm, fusion=keyframe_interval, views=3/4, total=247.2 ms
+frame 155: tracked, points=12839, model=6000, fitness=0.950, rmse=2.16 mm, fusion=keyframe_interval, views=3/4, total=386.7 ms
+frame 156: tracked, points=12874, model=6000, fitness=0.976, rmse=2.04 mm, fusion=integrated, views=3/4, total=210.7 ms
+frame 157: tracked, points=12687, model=6000, fitness=0.955, rmse=2.31 mm, fusion=keyframe_interval, views=3/4, total=247.8 ms
+frame 158: tracked, points=13222, model=6000, fitness=0.944, rmse=2.19 mm, fusion=keyframe_interval, views=3/4, total=238.2 ms
+frame 159: tracked, points=13396, model=6000, fitness=0.938, rmse=2.11 mm, fusion=integrated, views=3/4, total=306.7 ms
+frame 160: tracked, points=13503, model=6000, fitness=0.927, rmse=2.42 mm, fusion=keyframe_interval, views=3/4, total=411.7 ms
+frame 161: tracked, points=13615, model=6000, fitness=0.943, rmse=2.11 mm, fusion=keyframe_interval, views=3/4, total=213.1 ms
+frame 162: tracked, points=13812, model=6000, fitness=0.922, rmse=2.47 mm, fusion=integrated, views=3/4, total=231.9 ms
+frame 163: tracked, points=13849, model=6000, fitness=0.954, rmse=2.05 mm, fusion=keyframe_interval, views=3/4, total=235.3 ms
+frame 164: tracked, points=13892, model=6000, fitness=0.936, rmse=2.10 mm, fusion=keyframe_interval, views=3/4, total=241.6 ms
+frame 165: tracked, points=13911, model=6000, fitness=0.932, rmse=2.23 mm, fusion=integrated, views=3/4, total=451.9 ms
+frame 166: tracked, points=13910, model=6000, fitness=0.949, rmse=2.05 mm, fusion=keyframe_interval, views=3/4, total=169.8 ms
+frame 167: tracked, points=14002, model=6000, fitness=0.945, rmse=1.95 mm, fusion=keyframe_interval, views=3/4, total=175.5 ms
+frame 168: tracked, points=14017, model=6000, fitness=0.939, rmse=1.99 mm, fusion=integrated, views=3/4, total=217.8 ms
+frame 169: tracked, points=14018, model=6000, fitness=0.947, rmse=1.97 mm, fusion=keyframe_interval, views=3/4, total=178.2 ms
+frame 170: tracked, points=17937, model=6000, fitness=0.886, rmse=2.16 mm, fusion=keyframe_interval, views=4/4, total=370.9 ms
+frame 171: tracked, points=18036, model=6000, fitness=0.884, rmse=2.27 mm, fusion=integrated, views=4/4, total=228.5 ms
+frame 172: tracked, points=18160, model=6000, fitness=0.889, rmse=2.17 mm, fusion=keyframe_interval, views=4/4, total=192.3 ms
+frame 173: tracked, points=18231, model=6000, fitness=0.863, rmse=2.43 mm, fusion=keyframe_interval, views=4/4, total=198.4 ms
+frame 174: tracked, points=18264, model=6000, fitness=0.869, rmse=2.53 mm, fusion=integrated, views=4/4, total=292.9 ms
+frame 175: tracked, points=18274, model=6000, fitness=0.895, rmse=2.22 mm, fusion=keyframe_interval, views=4/4, total=193.1 ms
+frame 176: tracked, points=11360, model=6000, fitness=0.820, rmse=2.45 mm, fusion=keyframe_interval, views=4/4, total=194.2 ms
+frame 177: tracked, points=15575, model=6000, fitness=0.457, rmse=3.07 mm, fusion=pose_quality, views=0/4, total=160.8 ms
+frame 178: tracked, points=15954, model=6000, fitness=0.805, rmse=2.45 mm, fusion=integrated, views=4/4, total=238.9 ms
+frame 179: lost [low_fitness: fitness=0.334 < 0.4], points=14770, model=6000, fitness=0.334, rmse=2.96 mm, fusion=tracking_lost, views=0/4, total=197.1 ms
+frame 180: tracked, points=14302, model=6000, fitness=0.628, rmse=2.64 mm, fusion=keyframe_interval, views=4/4, total=210.5 ms
+frame 181: tracked, points=14296, model=6000, fitness=0.921, rmse=2.34 mm, fusion=keyframe_interval, views=4/4, total=197.0 ms
+frame 182: tracked, points=14159, model=6000, fitness=0.866, rmse=2.85 mm, fusion=integrated, views=4/4, total=222.5 ms
+frame 183: tracked, points=14061, model=6000, fitness=0.910, rmse=2.40 mm, fusion=keyframe_interval, views=4/4, total=199.4 ms
+frame 184: tracked, points=14078, model=6000, fitness=0.904, rmse=2.43 mm, fusion=keyframe_interval, views=4/4, total=206.5 ms
+frame 185: tracked, points=14179, model=6000, fitness=0.899, rmse=2.47 mm, fusion=integrated, views=4/4, total=255.5 ms
+frame 186: tracked, points=14207, model=6000, fitness=0.890, rmse=2.45 mm, fusion=keyframe_interval, views=4/4, total=215.5 ms
+frame 187: tracked, points=14179, model=6000, fitness=0.899, rmse=2.44 mm, fusion=keyframe_interval, views=4/4, total=205.6 ms
+frame 188: tracked, points=14161, model=6000, fitness=0.884, rmse=2.44 mm, fusion=integrated, views=4/4, total=220.2 ms
+frame 189: tracked, points=14161, model=6000, fitness=0.905, rmse=2.43 mm, fusion=keyframe_interval, views=4/4, total=212.1 ms
+frame 190: tracked, points=14811, model=6000, fitness=0.877, rmse=2.38 mm, fusion=keyframe_interval, views=4/4, total=221.5 ms
+frame 191: tracked, points=14841, model=6000, fitness=0.869, rmse=2.43 mm, fusion=integrated, views=4/4, total=237.0 ms
+frame 192: tracked, points=14903, model=6000, fitness=0.882, rmse=2.39 mm, fusion=keyframe_interval, views=4/4, total=195.0 ms
+frame 193: tracked, points=14870, model=6000, fitness=0.871, rmse=2.31 mm, fusion=keyframe_interval, views=4/4, total=206.6 ms
+frame 194: tracked, points=14761, model=6000, fitness=0.880, rmse=2.38 mm, fusion=integrated, views=4/4, total=263.6 ms
+frame 195: tracked, points=15248, model=6000, fitness=0.861, rmse=2.31 mm, fusion=keyframe_interval, views=4/4, total=254.7 ms
+frame 196: tracked, points=15242, model=6000, fitness=0.865, rmse=2.25 mm, fusion=keyframe_interval, views=4/4, total=244.5 ms
+frame 197: tracked, points=15268, model=6000, fitness=0.859, rmse=2.21 mm, fusion=integrated, views=4/4, total=272.6 ms
+frame 198: tracked, points=15269, model=6000, fitness=0.871, rmse=2.19 mm, fusion=keyframe_interval, views=4/4, total=281.3 ms
+frame 199: tracked, points=15237, model=6000, fitness=0.886, rmse=2.28 mm, fusion=keyframe_interval, views=4/4, total=215.6 ms
+frame 200: tracked, points=15301, model=6000, fitness=0.871, rmse=2.25 mm, fusion=integrated, views=4/4, total=256.2 ms
+frame 201: tracked, points=15283, model=6000, fitness=0.882, rmse=2.20 mm, fusion=keyframe_interval, views=4/4, total=197.3 ms
+frame 202: tracked, points=15273, model=6000, fitness=0.878, rmse=2.19 mm, fusion=keyframe_interval, views=4/4, total=280.7 ms
+frame 203: tracked, points=15278, model=6000, fitness=0.878, rmse=2.17 mm, fusion=integrated, views=4/4, total=267.8 ms
+frame 204: tracked, points=15298, model=6000, fitness=0.893, rmse=2.19 mm, fusion=keyframe_interval, views=4/4, total=245.2 ms
+frame 205: tracked, points=15308, model=6000, fitness=0.891, rmse=2.20 mm, fusion=keyframe_interval, views=4/4, total=245.5 ms
+Traceback (most recent call last):
+  File "/home/temp_id/paradex/paradex/vision/sam3_stream.py", line 207, in <module>
+    _worker(parser.parse_args())
+  File "/home/temp_id/paradex/paradex/vision/sam3_stream.py", line 179, in _worker
+    packet = _receive_worker_request(0)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/temp_id/paradex/paradex/vision/sam3_stream.py", line 148, in _receive_worker_request
+    return _receive(fd, timeout=86400)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/temp_id/paradex/paradex/vision/sam3_stream.py", line 60, in _receive
+    size = struct.unpack("!Q", _transfer(fd, size=8, timeout=timeout))[0]
+                               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/temp_id/paradex/paradex/vision/sam3_stream.py", line 34, in _transfer
+    readable, writable, _ = select.select([] if writing else [fd], [fd] if writing else [], [], wait)
+                            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+KeyboardInterrupt
+Traceback (most recent call last):
+  File "/home/temp_id/anaconda3/envs/robot/lib/python3.8/runpy.py", line 194, in _run_module_as_main
+    return _run_code(code, main_globals, None,
+  File "/home/temp_id/anaconda3/envs/robot/lib/python3.8/runpy.py", line 87, in _run_code
+    exec(code, run_globals)
+  File "/home/temp_id/paradex/paradex/vision/live_palm_pose.py", line 180, in <module>
+    _run_ros_bridge(args.topic)
+  File "/home/temp_id/paradex/paradex/vision/live_palm_pose.py", line 167, in _run_ros_bridge
+    rclpy.spin(node)
+  File "/home/temp_id/ros2_humble/install/rclpy/lib/python3.8/site-packages/rclpy/__init__.py", line 229, in spin
+    executor.spin_once()
+  File "/home/temp_id/ros2_humble/install/rclpy/lib/python3.8/site-packages/rclpy/executors.py", line 773, in spin_once
+    self._spin_once_impl(timeout_sec)
+  File "/home/temp_id/ros2_humble/install/rclpy/lib/python3.8/site-packages/rclpy/executors.py", line 762, in _spin_once_impl
+    handler, entity, node = self.wait_for_ready_callbacks(timeout_sec=timeout_sec)
+  File "/home/temp_id/ros2_humble/install/rclpy/lib/python3.8/site-packages/rclpy/executors.py", line 745, in wait_for_ready_callbacks
+    return next(self._cb_iter)
+  File "/home/temp_id/ros2_humble/install/rclpy/lib/python3.8/site-packages/rclpy/executors.py", line 642, in _wait_for_ready_callbacks
+    wait_set.wait(timeout_nsec)
+KeyboardInterrupt
+Saved tracking run: /home/temp_id/paradex/output/stereo_tracking/20261007_002744_825302
+(viser) Connection closed (0, 0 total)
+(viser) Server stopped

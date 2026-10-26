@@ -528,8 +528,9 @@ def test_pedal_execution_is_immediate_without_terminal_confirmation(
     assert len(calls) == 1
 
 
-def test_pedal_replay_cycle_skips_preview_and_plan_persistence(
-    monkeypatch, tmp_path: Path
+@pytest.mark.parametrize("trigger", ["pedal", "viser"])
+def test_interactive_replay_cycle_skips_preview_and_plan_persistence(
+    monkeypatch, tmp_path: Path, trigger: str
 ) -> None:
     trajectory = replay_core.ReplayTrajectory(
         arm_poses=np.stack((_pose(0.0), _pose(0.1))),
@@ -543,7 +544,7 @@ def test_pedal_replay_cycle_skips_preview_and_plan_persistence(
         frame_index=8,
         live_arm_pose=np.eye(4),
         live_hand_qpos=np.zeros(16),
-        trigger="pedal",
+        trigger=trigger,
     )
     build_calls = []
     execute_calls = []
@@ -557,7 +558,7 @@ def test_pedal_replay_cycle_skips_preview_and_plan_persistence(
     monkeypatch.setattr(
         grasp_vis,
         "_preview_top_candidate_replay",
-        lambda *args, **kwargs: pytest.fail("pedal fast path must skip preview"),
+        lambda *args, **kwargs: pytest.fail("interactive fast path must skip preview"),
     )
     monkeypatch.setattr(
         grasp_vis,

@@ -138,6 +138,13 @@ def compute_fk(root_dir, arm):
         np.save(os.path.join(root_dir, index, "eef_fk.npy"), eef)
 
 
+# Steps where the board is mostly out of view (a handful of triangulated
+# corners) give unreliable rigid fits and can share no corners with the
+# neighbouring step, so they are dropped from the hand-eye solve.
+MIN_CHARUCO_POINTS = 10
+MIN_COMMON_CHARUCO_POINTS = 6
+
+
 def get_valid_indices(root_dir):
     """Get indices that have valid charuco detection files with actual points."""
     index_list = sorted(os.listdir(root_dir))
@@ -151,8 +158,11 @@ def get_valid_indices(root_dir):
         if os.path.exists(ids_path) and os.path.exists(corners_path):
             # Check if files have actual points (not empty)
             ids = np.load(ids_path)
-            if len(ids) == 0:
-                print(f"Skipping index {index}: empty charuco detection")
+            if len(ids) < MIN_CHARUCO_POINTS:
+                print(
+                    f"Skipping index {index}: only {len(ids)} charuco points "
+                    f"(< {MIN_CHARUCO_POINTS})"
+                )
                 continue
             valid_indices.append(index)
         else:
@@ -222,6 +232,12 @@ def compute_motion(root_dir):
         ids_prev = charuco_id_list[i-1]
         
         common_idx, common_idx_prev = find_common_indices(ids, ids_prev)
+        n_common = 0 if common_idx is None else len(common_idx)
+        if n_common < MIN_COMMON_CHARUCO_POINTS:
+            raise ValueError(
+                f"Steps {index_list[i-1]} and {index_list[i]} in {root_dir} share only "
+                f"{n_common} charuco points (< {MIN_COMMON_CHARUCO_POINTS})"
+            )
 
         cam_cor = charuco_cor_list[i][common_idx]
         cam_cor_prev = charuco_cor_list[i-1][common_idx_prev]

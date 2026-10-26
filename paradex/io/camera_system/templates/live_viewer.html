@@ -1,0 +1,55 @@
+<!doctype html>
+<html lang="ko">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Paradex · Camera Live</title>
+<style>
+:root{color-scheme:dark;font-family:system-ui,sans-serif;background:#10151d;color:#e5edf5}
+*{box-sizing:border-box}[hidden]{display:none!important}
+body{margin:0;padding:24px;max-width:1900px;margin:auto}
+header{display:flex;justify-content:space-between;align-items:center;gap:16px}
+h1{font-size:25px;margin:0}small,.muted{color:#9eafc2}
+.badge{background:#163b35;color:#85dfc1;border:1px solid #2b6659;padding:7px 12px;border-radius:20px;font-size:12px;white-space:nowrap}
+.controls{display:flex;gap:12px;align-items:end;margin:20px 0 16px;flex-wrap:wrap}
+label{display:grid;gap:7px;font-size:12px;color:#a9b7c8}
+select,button{background:#202b3a;border:1px solid #3b4c62;color:#e5edf5;border-radius:7px;padding:10px;font-size:14px}
+button{cursor:pointer}button:hover{border-color:#6a9bc3}button:focus-visible,select:focus-visible{outline:2px solid #85dfc1;outline-offset:3px}
+#camera{min-width:270px}#pcs{display:flex;gap:8px;flex-wrap:wrap;margin:16px 0}
+.pc{font-size:12px;padding:7px 11px;color:#a7b8ce}.pc.on{border-color:#31715f;color:#91d8bc}
+.stage{position:relative;display:flex;align-items:center;justify-content:center;background:#080c12;border:1px solid #2d394b;border-radius:10px;min-height:320px;height:calc(100vh - 300px);overflow:hidden}
+.stage img{max-width:100%;max-height:100%;object-fit:contain}
+.notice{position:absolute;left:12px;bottom:12px;background:#172332ed;border-radius:6px;padding:9px 12px;max-width:calc(100% - 24px);font-size:13px;text-align:left;pointer-events:none}
+#grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:12px;align-items:start}
+#grid.manual-columns{grid-template-columns:repeat(var(--columns),minmax(0,1fr))}
+.tile{display:block;width:100%;min-width:0;text-align:left;padding:0;border:1px solid #2d394b;border-radius:9px;overflow:hidden;background:#141e2b}
+.tile-head,.tile-foot{display:flex;justify-content:space-between;align-items:center;gap:8px;padding:9px 11px;font-size:12px;min-width:0}
+.tile-head strong{font-size:14px;font-variant-numeric:tabular-nums}.tile-head span,.tile-foot{color:#9eafc2}
+.tile-picture{position:relative;aspect-ratio:4/3;background:#080c12;display:flex;align-items:center;justify-content:center}
+.tile-picture img{width:100%;height:100%;object-fit:contain;position:absolute;inset:0}
+.tile-picture .notice{font-size:11px;padding:6px 8px;left:8px;bottom:8px;max-width:calc(100% - 16px)}
+.tile-foot span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.tile.offline{opacity:.65}
+.tile .dot{width:7px;height:7px;background:#526377;border-radius:50%;flex-shrink:0}.tile.live .dot{background:#85dfc1}
+#empty{padding:60px 20px;text-align:center;color:#a9b7c8;border:1px dashed #3b4c62;border-radius:9px}
+footer{display:flex;justify-content:space-between;gap:16px;margin-top:13px;font-size:12px;color:#9eafc2}#details{font-variant-numeric:tabular-nums}
+@media(max-width:650px){body{padding:14px}.stage{height:55vh}header{align-items:start}h1{font-size:20px}footer{flex-direction:column}#grid{gap:8px;grid-template-columns:repeat(2,minmax(0,1fr))}#grid.manual-columns{grid-template-columns:repeat(2,minmax(0,1fr))}.tile-head,.tile-foot{padding:7px;font-size:10px}.tile-head strong{font-size:12px}.tile-picture .notice{font-size:10px}.controls{gap:9px}#camera{min-width:230px}}
+</style>
+<header>
+ <div><h1>Paradex <span class="muted">/ Camera Live</span></h1><small>Capture PC 카메라 실시간 뷰어</small></div>
+ <span class="badge">읽기 전용</span>
+</header>
+<div id="pcs" aria-label="Capture PC 상태 및 필터"></div>
+<div class="controls">
+ <label>보기<select id="view"><option value="single">단일 카메라</option><option value="grid">그리드</option></select></label>
+ <label id="camera-control">카메라<select id="camera"><option value="">연결 확인 중…</option></select></label>
+ <label id="quality-control">화질<select id="quality"><option value="preview">미리보기 · 640px / 최대 5 fps</option><option value="full">원본 · 2048px / 최대 5 fps</option></select></label>
+ <label id="pc-control" hidden>카메라 그룹<select id="grid-pc"><option value="all">전체 Capture PC</option></select></label>
+ <label id="columns-control" hidden>열 수<select id="columns"><option value="auto">자동</option><option value="2">2열</option><option value="3">3열</option><option value="4">4열</option><option value="6">6열</option></select></label>
+ <label id="rate-control" hidden>갱신 속도<select id="grid-fps"><option value="1">1 fps</option><option value="2" selected>2 fps</option><option value="5">5 fps</option></select></label>
+ <button id="pause" type="button">일시정지</button>
+</div>
+<div id="single" class="stage"><img id="image" alt="선택한 카메라 영상" hidden><div id="notice" class="notice">카메라 목록을 불러오는 중…</div></div>
+<div id="grid" aria-label="카메라 그리드" hidden></div>
+<div id="empty" hidden>선택한 그룹에 카메라가 없습니다.</div>
+<footer><span id="details">연결 확인 중…</span><span id="hint">촬영 준비·전환 중에는 영상이 잠시 멈출 수 있습니다.</span></footer>
+<script type="module" src="/viewer.mjs"></script>
+</html>

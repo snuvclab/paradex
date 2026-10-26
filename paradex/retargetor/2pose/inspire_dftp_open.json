@@ -1,0 +1,12 @@
+{
+  "hand": "inspire_dftp",
+  "action_order": [
+    "little",
+    "ring",
+    "middle",
+    "index",
+    "thumb_pitch",
+    "thumb_yaw"
+  ],
+  "action_raw": [998, 1000, 998, 1000, 1000, 990]
+}

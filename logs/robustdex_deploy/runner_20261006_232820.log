@@ -1,0 +1,15 @@
+RUNNER: started (hang=False)
+RUNNER: SIGINT -> hold robot, close controllers
+Traceback (most recent call last):
+  File "/tmp/rdx_mock_runner.py", line 8, in <module>
+    while True: time.sleep(0.2)
+                ^^^^^^^^^^^^^^^
+KeyboardInterrupt
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "/tmp/rdx_mock_runner.py", line 10, in <module>
+    print("RUNNER: SIGINT -> hold robot, close controllers", flush=True); time.sleep(2.0); print("RUNNER: closed", flush=True)
+                                                                          ^^^^^^^^^^^^^^^
+KeyboardInterrupt

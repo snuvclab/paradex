@@ -1,6 +1,6 @@
 {
   "version": "1.0.0",
-  "lastScanned": 1786515650623,
+  "lastScanned": 1791981827392,
   "projectRoot": "/home/temp_id/paradex",
   "techStack": {
     "languages": [
@@ -19,7 +19,7 @@
   },
   "build": {
     "buildCommand": null,
-    "testCommand": null,
+    "testCommand": "python3 - <<'EOF'\nfrom pathlib import Path\np = Path(\"src/dataset_acquisition/hri/capture_robot.py\"); s = p.read_text()\nold = \"\"\"        f\"right={args.inspire_right_ip} via {args.inspire_right_interface}, \"\n        f\"left={args.inspire_left_ip} via {args.inspire_left_interface}\"\n    )\"\"\"\nnew = \"\"\"        f\"right={args.inspire_right_ip} via {args.inspire_right_interface} \"\n        f\"force={args.inspire_right_force_limits}, \"\n        f\"left={args.inspire_left_ip} via {args.inspire_left_interface} \"\n        f\"force={args.inspire_left_force_limits}\"\n    )\"\"\"\nassert old in s; p.write_text(s.replace(old, new)); print(\"ok\")\nEOF\ntimeout 200 /home/temp_id/anaconda3/envs/robot/bin/python -m pytest -q tests/test_inspire_controller_ip.py tests/test_inspire_dexpilot.py tests/test_capture_bimanual_state.py 2>&1 | tail -2",
     "lintCommand": null,
     "devCommand": null,
     "scripts": {}
@@ -35,6 +35,7 @@
     "workspaces": [],
     "mainDirectories": [
       "docs",
+      "scripts",
       "src",
       "tests"
     ],
@@ -45,18 +46,21 @@
     "__pycache__": {
       "path": "__pycache__",
       "purpose": null,
-      "fileCount": 2,
-      "lastAccessed": 1786515650618,
+      "fileCount": 8,
+      "lastAccessed": 1791981827385,
       "keyFiles": [
-        "setup.cpython-38.pyc",
-        "tmp30.cpython-312.pyc"
+        "floor_replay.tmp.cpython-312.pyc",
+        "floor_target.tmp.cpython-312.pyc",
+        "render_collision.tmp.cpython-312.pyc",
+        "render_recorded_replay_videos.tmp.cpython-312.pyc",
+        "render_replay_base.tmp.cpython-312.pyc"
       ]
     },
     "bodex": {
       "path": "bodex",
       "purpose": null,
       "fileCount": 1,
-      "lastAccessed": 1786515650620,
+      "lastAccessed": 1791981827387,
       "keyFiles": [
         "scale010_grasp.npy"
       ]
@@ -65,7 +69,7 @@
       "path": "colmap",
       "purpose": null,
       "fileCount": 9,
-      "lastAccessed": 1786515650620,
+      "lastAccessed": 1791981827387,
       "keyFiles": [
         "CHANGELOG.txt",
         "CMakeLists.txt",
@@ -78,7 +82,7 @@
       "path": "curobo",
       "purpose": null,
       "fileCount": 12,
-      "lastAccessed": 1786515650620,
+      "lastAccessed": 1791981827388,
       "keyFiles": [
         "CHANGELOG.md",
         "CODEOWNERS",
@@ -91,27 +95,60 @@
       "path": "data",
       "purpose": "Data files",
       "fileCount": 0,
-      "lastAccessed": 1786515650620,
+      "lastAccessed": 1791981827388,
       "keyFiles": []
     },
     "docs": {
       "path": "docs",
       "purpose": "Documentation",
-      "fileCount": 10,
-      "lastAccessed": 1786515650620,
+      "fileCount": 19,
+      "lastAccessed": 1791981827388,
       "keyFiles": [
         "Makefile",
+        "act_xarm_allegro_inference.md",
         "conf.py",
-        "genindex.html",
-        "index.html",
-        "index.rst"
+        "cutie_stereo_tracking.md",
+        "distributed_stereo.md"
+      ]
+    },
+    "external": {
+      "path": "external",
+      "purpose": null,
+      "fileCount": 0,
+      "lastAccessed": 1791981827388,
+      "keyFiles": []
+    },
+    "human_robot_mlp": {
+      "path": "human_robot_mlp",
+      "purpose": null,
+      "fileCount": 5,
+      "lastAccessed": 1791981827388,
+      "keyFiles": [
+        "README.md",
+        "core.py",
+        "physics_eval.py",
+        "train_mlp.py",
+        "vendor_model_builder.py"
+      ]
+    },
+    "human_robot_retarget": {
+      "path": "human_robot_retarget",
+      "purpose": null,
+      "fileCount": 60,
+      "lastAccessed": 1791981827388,
+      "keyFiles": [
+        "README.md",
+        "README_ALLEGRO_DEX.md",
+        "README_ALLEGRO_V5.md",
+        "README_APPLE_F1.md",
+        "README_BABY_BEAKER_F1.md"
       ]
     },
     "jisoo_test": {
       "path": "jisoo_test",
       "purpose": null,
       "fileCount": 4,
-      "lastAccessed": 1786515650620,
+      "lastAccessed": 1791981827388,
       "keyFiles": [
         "gui_controller.py",
         "test_insys.py",
@@ -119,18 +156,38 @@
         "visualize_trajectory.py"
       ]
     },
+    "logs": {
+      "path": "logs",
+      "purpose": null,
+      "fileCount": 0,
+      "lastAccessed": 1791981827388,
+      "keyFiles": []
+    },
     "lookup": {
       "path": "lookup",
       "purpose": null,
       "fileCount": 0,
-      "lastAccessed": 1786515650620,
+      "lastAccessed": 1791981827389,
       "keyFiles": []
+    },
+    "output": {
+      "path": "output",
+      "purpose": null,
+      "fileCount": 8,
+      "lastAccessed": 1791981827389,
+      "keyFiles": [
+        "allegro_v5_preprocess_smoke.log",
+        "pressurevision_allegro_regions60_dense_template.npz",
+        "pressurevision_allegro_regions60_template.npz",
+        "regions60_make_camera_view.py",
+        "robot_contact_architecture_restoration.md"
+      ]
     },
     "paradex": {
       "path": "paradex",
       "purpose": null,
       "fileCount": 1,
-      "lastAccessed": 1786515650621,
+      "lastAccessed": 1791981827389,
       "keyFiles": [
         "__init__.py"
       ]
@@ -139,7 +196,7 @@
       "path": "paradex.egg-info",
       "purpose": null,
       "fileCount": 5,
-      "lastAccessed": 1786515650621,
+      "lastAccessed": 1791981827389,
       "keyFiles": [
         "PKG-INFO",
         "SOURCES.txt",
@@ -152,7 +209,7 @@
       "path": "rendered",
       "purpose": null,
       "fileCount": 341,
-      "lastAccessed": 1786515650621,
+      "lastAccessed": 1791981827389,
       "keyFiles": [
         "00007.jpeg",
         "00062.jpeg",
@@ -165,7 +222,7 @@
       "path": "rendered_video",
       "purpose": null,
       "fileCount": 36,
-      "lastAccessed": 1786515650621,
+      "lastAccessed": 1791981827389,
       "keyFiles": [
         "bbasket.zip",
         "book_no_filter_vs_filter.mp4",
@@ -174,18 +231,31 @@
         "rendered.mp4"
       ]
     },
+    "robustdex_deploy": {
+      "path": "robustdex_deploy",
+      "purpose": null,
+      "fileCount": 12,
+      "lastAccessed": 1791981827389,
+      "keyFiles": [
+        "__init__.py",
+        "backends.py",
+        "cloud.py",
+        "contact_proxy.py",
+        "kinematics.py"
+      ]
+    },
     "rsc": {
       "path": "rsc",
       "purpose": null,
       "fileCount": 0,
-      "lastAccessed": 1786515650621,
+      "lastAccessed": 1791981827390,
       "keyFiles": []
     },
     "script": {
       "path": "script",
       "purpose": null,
       "fileCount": 8,
-      "lastAccessed": 1786515650621,
+      "lastAccessed": 1791981827390,
       "keyFiles": [
         "allegro.txt",
         "allegro_ros2.txt",
@@ -194,18 +264,31 @@
         "grid_image.sh"
       ]
     },
+    "scripts": {
+      "path": "scripts",
+      "purpose": "Build/utility scripts",
+      "fileCount": 46,
+      "lastAccessed": 1791981827390,
+      "keyFiles": [
+        "audit_contact_video_alignment.py",
+        "build_fast_stereo_trt.py",
+        "build_fast_stereo_trt.py.orig",
+        "build_pressurevision_region_template.py",
+        "export_all_contact_predictions.py"
+      ]
+    },
     "src": {
       "path": "src",
       "purpose": "Source code",
       "fileCount": 0,
-      "lastAccessed": 1786515650621,
+      "lastAccessed": 1791981827390,
       "keyFiles": []
     },
     "system": {
       "path": "system",
       "purpose": null,
       "fileCount": 1,
-      "lastAccessed": 1786515650622,
+      "lastAccessed": 1791981827390,
       "keyFiles": [
         "README.md"
       ]
@@ -214,7 +297,7 @@
       "path": "systemd",
       "purpose": null,
       "fileCount": 1,
-      "lastAccessed": 1786515650622,
+      "lastAccessed": 1791981827390,
       "keyFiles": [
         "paradex-camera-agent@.service"
       ]
@@ -222,28 +305,28 @@
     "tests": {
       "path": "tests",
       "purpose": "Test files",
-      "fileCount": 14,
-      "lastAccessed": 1786515650622,
+      "fileCount": 105,
+      "lastAccessed": 1791981827390,
       "keyFiles": [
-        "test_aravis_gstreamer_capture.py",
-        "test_aravis_timestamp.py",
-        "test_camera_daemon_reader.py",
-        "test_capture_bimanual_state.py",
-        "test_extrinsic_validation.py"
+        "benchmark_allinone_calibration.py",
+        "test_act_xarm_allegro_camera.py",
+        "test_act_xarm_allegro_checkpoint.py",
+        "test_act_xarm_allegro_core.py",
+        "test_act_xarm_allegro_hardware_bridge.py"
       ]
     },
     "thirdparty": {
       "path": "thirdparty",
       "purpose": null,
       "fileCount": 0,
-      "lastAccessed": 1786515650622,
+      "lastAccessed": 1791981827390,
       "keyFiles": []
     },
     "tmp": {
       "path": "tmp",
       "purpose": null,
       "fileCount": 27,
-      "lastAccessed": 1786515650622,
+      "lastAccessed": 1791981827390,
       "keyFiles": [
         "add_frame_no.py",
         "change.py",
@@ -255,42 +338,42 @@
     "tools": {
       "path": "tools",
       "purpose": null,
-      "fileCount": 6,
-      "lastAccessed": 1786515650622,
+      "fileCount": 8,
+      "lastAccessed": 1791981827390,
       "keyFiles": [
+        "allegro_v5_range_of_motion.py",
+        "make_curobo_cfg_variant.py",
         "make_random_video_grid.py",
         "monitor_streamdeck_pedal.py",
-        "run_inspire_f1_ethercat.py",
-        "sample_one_video_per_videos_dir.py",
-        "urdf_viser_visualizer.py"
+        "run_inspire_f1_ethercat.py"
       ]
     },
     "xarm_hecalib_compare_20260403_024512": {
       "path": "xarm_hecalib_compare_20260403_024512",
       "purpose": null,
       "fileCount": 0,
-      "lastAccessed": 1786515650622,
+      "lastAccessed": 1791981827390,
       "keyFiles": []
     },
     "xarm_hecalib_compare_20260403_024521": {
       "path": "xarm_hecalib_compare_20260403_024521",
       "purpose": null,
       "fileCount": 0,
-      "lastAccessed": 1786515650622,
+      "lastAccessed": 1791981827390,
       "keyFiles": []
     },
     "xarm_hecalib_compare_20260403_024528": {
       "path": "xarm_hecalib_compare_20260403_024528",
       "purpose": null,
       "fileCount": 0,
-      "lastAccessed": 1786515650622,
+      "lastAccessed": 1791981827390,
       "keyFiles": []
     },
     "xarm_hecalib_compare_20260403_024533": {
       "path": "xarm_hecalib_compare_20260403_024533",
       "purpose": null,
       "fileCount": 45,
-      "lastAccessed": 1786515650622,
+      "lastAccessed": 1791981827390,
       "keyFiles": [
         "00_compare.npz",
         "01_compare.npz",
@@ -303,7 +386,7 @@
       "path": "xarm_hecalib_compare_20260403_024619",
       "purpose": null,
       "fileCount": 1,
-      "lastAccessed": 1786515650622,
+      "lastAccessed": 1791981827391,
       "keyFiles": [
         "failures.txt"
       ]
@@ -312,9 +395,18 @@
       "path": "xarm_hecalib_compare_sdk_20260403_025002",
       "purpose": null,
       "fileCount": 1,
-      "lastAccessed": 1786515650622,
+      "lastAccessed": 1791981827391,
       "keyFiles": [
         "failures.txt"
+      ]
+    },
+    "human_robot_mlp/tests": {
+      "path": "human_robot_mlp/tests",
+      "purpose": "Test files",
+      "fileCount": 1,
+      "lastAccessed": 1791981827391,
+      "keyFiles": [
+        "test_core.py"
       ]
     }
   },
@@ -338,6 +430,12 @@
       "type": "file"
     },
     {
+      "path": "paradex/retargetor/inspire_dexpilot.py",
+      "accessCount": 3,
+      "lastAccessed": 1792040563639,
+      "type": "file"
+    },
+    {
       "path": "rsc/curobo/content/configs/robot/spheres/xarm_allegro_v5.yml",
       "accessCount": 2,
       "lastAccessed": 1779815814196,
@@ -347,6 +445,18 @@
       "path": "paradex/io/camera_system/remote_camera_controller.py",
       "accessCount": 2,
       "lastAccessed": 1779816359675,
+      "type": "file"
+    },
+    {
+      "path": "paradex/retargetor/hand_regargetor.py",
+      "accessCount": 2,
+      "lastAccessed": 1792038911846,
+      "type": "file"
+    },
+    {
+      "path": "paradex/retargetor/unimanual.py",
+      "accessCount": 2,
+      "lastAccessed": 1792040024663,
       "type": "file"
     },
     {
@@ -419,6 +529,12 @@
       "path": "paradex/io/camera_system/camera_server_daemon.py",
       "accessCount": 1,
       "lastAccessed": 1779866451074,
+      "type": "file"
+    },
+    {
+      "path": "tests/test_inspire_dexpilot.py",
+      "accessCount": 1,
+      "lastAccessed": 1792039419713,
       "type": "file"
     }
   ],

@@ -1,0 +1,18 @@
+Exception in thread Thread-1:
+Traceback (most recent call last):
+  File "/home/temp_id/anaconda3/envs/robot/lib/python3.8/threading.py", line 932, in _bootstrap_inner
+    self.run()
+  File "/home/temp_id/anaconda3/envs/robot/lib/python3.8/threading.py", line 870, in run
+    self._target(*self._args, **self._kwargs)
+  File "/home/temp_id/ros2_humble/install/rclpy/lib/python3.8/site-packages/rclpy/executors.py", line 298, in spin
+    self.spin_once()
+  File "/home/temp_id/ros2_humble/install/rclpy/lib/python3.8/site-packages/rclpy/executors.py", line 828, in spin_once
+    self._spin_once_impl(timeout_sec)
+  File "/home/temp_id/ros2_humble/install/rclpy/lib/python3.8/site-packages/rclpy/executors.py", line 809, in _spin_once_impl
+    handler, entity, node = self.wait_for_ready_callbacks(
+  File "/home/temp_id/ros2_humble/install/rclpy/lib/python3.8/site-packages/rclpy/executors.py", line 745, in wait_for_ready_callbacks
+    return next(self._cb_iter)
+  File "/home/temp_id/ros2_humble/install/rclpy/lib/python3.8/site-packages/rclpy/executors.py", line 618, in _wait_for_ready_callbacks
+    wait_set = _rclpy.WaitSet(
+rclpy._rclpy_pybind11.RCLError: failed to initialize wait set: the given context is not valid, either rcl_init() was not called or rcl_shutdown() was called., at /home/temp_id/ros2_humble/src/ros2/rcl/rcl/src/rcl/wait.c:130
+/bin/bash: line 1: 1697377 Killed                  bash -c 'source "/home/temp_id/ros2_humble/install/local_setup.bash" && source "/home/temp_id/xarm_ws/install/local_setup.bash" && source "/home/temp_id/allegro_ws/install/local_setup.bash" && exec "/home/temp_id/anaconda3/envs/robot/bin/python" -m robustdex_deploy.runner "$@"' bash --backend real --export /home/temp_id/paradex/robustdex_deploy/export_v5_3650 --dry-run --cloud-endpoint tcp://127.0.0.1:5571 --state-pub tcp://127.0.0.1:5572

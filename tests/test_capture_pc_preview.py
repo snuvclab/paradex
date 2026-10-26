@@ -51,6 +51,40 @@ def test_capture_pc_preview_collects_each_pc_frame_with_pc_label():
     assert frame_text == {"capture1:camera-1": "preview"}
 
 
+def test_capture_pc_preview_collects_only_selected_camera_names():
+    requested = []
+
+    class MultiCameraReader:
+        camera_names = ["26256735", "22641023"]
+
+        def get_preview(self, camera_name):
+            requested.append(camera_name)
+            return np.zeros((10, 10, 3), dtype=np.uint8)
+
+    preview = CapturePcPreviewGui(
+        pc_list=[],
+        camera_names=["26256735"],
+    )
+    preview._readers["capture16"] = MultiCameraReader()
+
+    images, frame_text = preview._collect_frames()
+
+    assert requested == ["26256735"]
+    assert list(images) == ["capture16:26256735"]
+    assert frame_text == {"capture16:26256735": "preview"}
+
+
+def test_single_camera_preview_uses_the_whole_grid_without_extra_columns():
+    preview = CapturePcPreviewGui(pc_list=[], camera_names=["26256735"])
+
+    display = preview._compose_camera_grid(
+        {"capture16:26256735": np.zeros((30, 40, 3), dtype=np.uint8)},
+        {"capture16:26256735": "preview"},
+    )
+
+    assert display.shape == (900, 1200, 3)
+
+
 def test_capture_pc_preview_shows_latest_frame_only_when_called_from_main_loop():
     fake_cv2 = FakeCv2()
     preview = CapturePcPreviewGui(

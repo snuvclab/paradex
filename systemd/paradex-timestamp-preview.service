@@ -1,0 +1,16 @@
+[Unit]
+Description=Paradex on-demand timestamp camera Web UI
+After=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=%h/paradex
+Environment=PYTHONUNBUFFERED=1
+Environment=GI_TYPELIB_PATH=/usr/local/lib/x86_64-linux-gnu/girepository-1.0
+ExecStart=/usr/bin/python3 -u -m paradex.io.camera_system.timestamp_preview --serial 22684253 --port 8765
+Restart=on-failure
+RestartSec=3
+TimeoutStopSec=15
+
+[Install]
+WantedBy=default.target

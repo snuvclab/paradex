@@ -1,0 +1,14 @@
+Traceback (most recent call last):
+  File "/home/temp_id/paradex/src/capture/camera/stereo_track.py", line 1335, in <module>
+    main()
+  File "/home/temp_id/paradex/src/capture/camera/stereo_track.py", line 1318, in main
+    ensure_inference_runtime(args, argv)
+  File "/home/temp_id/paradex/src/capture/camera/stereo_track.py", line 54, in ensure_inference_runtime
+    missing = [name for name in inference_modules if importlib.util.find_spec(name) is None]
+                                                     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "<frozen importlib.util>", line 100, in find_spec
+  File "<frozen importlib._bootstrap>", line 1262, in _find_spec
+  File "<frozen importlib._bootstrap_external>", line 1528, in find_spec
+  File "<frozen importlib._bootstrap_external>", line 1502, in _get_spec
+  File "<frozen importlib._bootstrap_external>", line 1633, in find_spec
+KeyboardInterrupt

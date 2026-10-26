@@ -69,7 +69,16 @@ _shared_executor_lock = Lock()
 def _ensure_shared_executor():
     global _shared_executor, _shared_executor_thread
     with _shared_executor_lock:
-        if _shared_executor is None:
+        if (
+            _shared_executor is None
+            or _shared_executor_thread is None
+            or not _shared_executor_thread.is_alive()
+        ):
+            if _shared_executor is not None:
+                try:
+                    _shared_executor.shutdown(timeout_sec=1.0)
+                except Exception:
+                    pass
             _shared_executor = MultiThreadedExecutor(num_threads=4)
             _shared_executor_thread = Thread(
                 target=_shared_executor.spin, daemon=True
@@ -467,7 +476,7 @@ class XArmControllerROS(Node):
         if self.save_event.is_set():
             self.stop()
 
-        global _shared_executor
+        global _shared_executor, _shared_executor_thread
         if _shared_executor is not None:
             try:
                 _shared_executor.remove_node(self)
@@ -475,6 +484,16 @@ class XArmControllerROS(Node):
                 pass
         self.destroy_node()
         if self._owns_rclpy and rclpy.ok():
+            with _shared_executor_lock:
+                if _shared_executor is not None:
+                    try:
+                        _shared_executor.shutdown(timeout_sec=2.0)
+                    except Exception:
+                        pass
+                if _shared_executor_thread is not None:
+                    _shared_executor_thread.join(timeout=2.0)
+                _shared_executor = None
+                _shared_executor_thread = None
             rclpy.shutdown()
 
     def move(self, action, is_servo=True):

@@ -540,7 +540,16 @@ def _add_cameras_to_viser(vis: ViserViewer, capture_root: str, c2r: np.ndarray) 
 
 
 def _resolve_mesh_path(mesh_name: str, mesh_root_dir: str) -> str:
-    return os.path.join(mesh_root_dir, mesh_name, f"{mesh_name}.obj")
+    root = os.path.expanduser(mesh_root_dir)
+    if root.lower().endswith(".obj"):
+        return root
+    candidates = (
+        os.path.join(root, mesh_name, f"{mesh_name}.obj"),
+        os.path.join(root, mesh_name, f"{mesh_name}_viser.obj"),
+        os.path.join(root, f"{mesh_name}.obj"),
+        os.path.join(root, f"{mesh_name}_viser.obj"),
+    )
+    return next((path for path in candidates if os.path.exists(path)), candidates[0])
 
 
 def _extract_pose_response(res: Dict[str, Any]) -> Dict[str, Any]:
@@ -1445,7 +1454,7 @@ def main() -> None:
     parser.add_argument("--rpc_addr", default="tcp://192.168.0.14:5570")
     parser.add_argument("--rpc_timeout_ms", type=int, default=300000)
     parser.add_argument("--rcc_entry", default="image_main.py")
-    parser.add_argument("--mesh_root_dir", default=os.path.join(shared_dir, "mesh_blender"))
+    parser.add_argument("--mesh_root_dir", default=os.path.join(shared_dir, "mesh_new"))
     parser.add_argument("--robot_urdf", default=DEFAULT_ROBOT_URDF)
     parser.add_argument("--eef_link", default="link6")
     parser.add_argument("--demo_base", default=DEFAULT_DEMO_BASE)

@@ -10,6 +10,7 @@ from pathlib import Path
 from typing import Any, Iterable
 
 import numpy as np
+from scipy.spatial.transform import Rotation
 
 from paradex.retargetor.experiment import replay_object_relative as core
 from paradex.retargetor.experiment import (
@@ -45,6 +46,9 @@ DEFAULT_CANDIDATE_EPISODES = (
 class ObjectPoseMatch:
     episode: core.Episode
     source_object_robot: np.ndarray
+    aligned_current_object_robot: np.ndarray
+    symmetry_angle_rad: float
+    symmetry_flipped: bool
     translation_error_m: float
     rotation_error_rad: float
     score: float
@@ -104,8 +108,10 @@ def parse_episode_ids(value: str | Iterable[int]) -> tuple[int, ...]:
 def load_candidate_episodes(
     episode_root: Path,
     episode_ids: Iterable[int],
+    *,
+    robot: str = "allegro_v5",
 ) -> list[core.Episode]:
-    args = argparse.Namespace(robot="allegro_v5")
+    args = argparse.Namespace(robot=robot)
     episodes: list[core.Episode] = []
     for episode_id in episode_ids:
         root = Path(episode_root).expanduser() / str(episode_id)
@@ -121,21 +127,55 @@ def rank_by_object_pose(
     *,
     translation_scale_m: float,
     rotation_scale_rad: float,
+    continuous_symmetry_axis_object: np.ndarray | None = None,
+    continuous_symmetry_allow_axis_flip: bool = False,
 ) -> list[ObjectPoseMatch]:
-    """Rank source object poses by a dimensionless weighted SE(3) distance."""
+    """Rank source poses, optionally quotienting a continuous axial symmetry."""
 
     if translation_scale_m <= 0 or rotation_scale_rad <= 0:
         raise ValueError("retrieval translation/rotation scales must be positive")
     current = core._as_transform(current_object_robot, label="current object pose")
+    symmetry_axis = None
+    if continuous_symmetry_axis_object is not None:
+        symmetry_axis = np.asarray(
+            continuous_symmetry_axis_object, dtype=np.float64
+        ).reshape(-1)
+        if (
+            symmetry_axis.shape != (3,)
+            or not np.all(np.isfinite(symmetry_axis))
+            or np.linalg.norm(symmetry_axis) <= 1e-12
+        ):
+            raise ValueError(
+                "continuous symmetry axis must be a finite non-zero 3-vector"
+            )
+        symmetry_axis = symmetry_axis / np.linalg.norm(symmetry_axis)
+    elif continuous_symmetry_allow_axis_flip:
+        raise ValueError("axis flip symmetry requires a continuous symmetry axis")
+
     matches: list[ObjectPoseMatch] = []
     for episode in episodes:
         source = np.linalg.inv(episode.source_c2r) @ episode.source_object_world
+        aligned_current, symmetry_angle, symmetry_flipped = (
+            align_pose_by_continuous_symmetry(
+                source,
+                current,
+                continuous_symmetry_axis_object=symmetry_axis,
+                continuous_symmetry_allow_axis_flip=(
+                    continuous_symmetry_allow_axis_flip
+                ),
+            )
+        )
         translation_error = float(np.linalg.norm(source[:3, 3] - current[:3, 3]))
-        rotation_error = core._rotation_error_rad(source[:3, :3], current[:3, :3])
+        rotation_error = core._rotation_error_rad(
+            source[:3, :3], aligned_current[:3, :3]
+        )
         matches.append(
             ObjectPoseMatch(
                 episode=episode,
                 source_object_robot=source,
+                aligned_current_object_robot=aligned_current,
+                symmetry_angle_rad=symmetry_angle,
+                symmetry_flipped=symmetry_flipped,
                 translation_error_m=translation_error,
                 rotation_error_rad=rotation_error,
                 score=float(
@@ -151,6 +191,78 @@ def rank_by_object_pose(
     return sorted(
         matches, key=lambda match: (match.score, int(match.episode.root.name))
     )
+
+
+def align_pose_by_continuous_symmetry(
+    source_object_robot: np.ndarray,
+    current_object_robot: np.ndarray,
+    *,
+    continuous_symmetry_axis_object: np.ndarray | None = None,
+    continuous_symmetry_allow_axis_flip: bool = False,
+) -> tuple[np.ndarray, float, bool]:
+    """Choose the current pose representative closest to a source pose.
+
+    The returned pose is physically equivalent to ``current_object_robot`` for
+    an object with the supplied continuous local-axis symmetry.
+    """
+    source = core._as_transform(source_object_robot, label="source object pose")
+    current = core._as_transform(current_object_robot, label="current object pose")
+    if continuous_symmetry_axis_object is None:
+        if continuous_symmetry_allow_axis_flip:
+            raise ValueError("axis flip symmetry requires a continuous symmetry axis")
+        return current.copy(), 0.0, False
+
+    symmetry_axis = np.asarray(
+        continuous_symmetry_axis_object, dtype=np.float64
+    ).reshape(-1)
+    if (
+        symmetry_axis.shape != (3,)
+        or not np.all(np.isfinite(symmetry_axis))
+        or np.linalg.norm(symmetry_axis) <= 1e-12
+    ):
+        raise ValueError("continuous symmetry axis must be a finite non-zero 3-vector")
+    symmetry_axis = symmetry_axis / np.linalg.norm(symmetry_axis)
+
+    branches = [(False, np.eye(4, dtype=np.float64))]
+    if continuous_symmetry_allow_axis_flip:
+        basis = np.eye(3)[int(np.argmin(np.abs(symmetry_axis)))]
+        flip_axis = np.cross(symmetry_axis, basis)
+        flip_axis = flip_axis / np.linalg.norm(flip_axis)
+        flip_transform = np.eye(4, dtype=np.float64)
+        flip_transform[:3, :3] = Rotation.from_rotvec(flip_axis * np.pi).as_matrix()
+        branches.append((True, flip_transform))
+
+    axis_cross = np.array(
+        [
+            [0.0, -symmetry_axis[2], symmetry_axis[1]],
+            [symmetry_axis[2], 0.0, -symmetry_axis[0]],
+            [-symmetry_axis[1], symmetry_axis[0], 0.0],
+        ],
+        dtype=np.float64,
+    )
+    best_pose = current.copy()
+    best_angle = 0.0
+    best_flipped = False
+    best_error = np.inf
+    for flipped, branch_transform in branches:
+        branch_current = current @ branch_transform
+        relative_rotation = source[:3, :3].T @ branch_current[:3, :3]
+        cosine_coefficient = float(
+            np.trace(relative_rotation)
+            - symmetry_axis @ relative_rotation @ symmetry_axis
+        )
+        sine_coefficient = float(np.trace(relative_rotation @ axis_cross))
+        angle = float(np.arctan2(sine_coefficient, cosine_coefficient))
+        spin_transform = np.eye(4, dtype=np.float64)
+        spin_transform[:3, :3] = Rotation.from_rotvec(symmetry_axis * angle).as_matrix()
+        aligned = branch_current @ spin_transform
+        error = core._rotation_error_rad(source[:3, :3], aligned[:3, :3])
+        if error < best_error:
+            best_error = error
+            best_pose = aligned
+            best_angle = angle
+            best_flipped = flipped
+    return best_pose, best_angle, best_flipped
 
 
 def _read_live_robot_state() -> tuple[np.ndarray, np.ndarray, np.ndarray]:
@@ -490,12 +602,8 @@ def allegro_thumb_index_midpoint_eef(
             )
         }
     )
-    index_tip_eef = urdf.get_transform(ALLEGRO_V5_INDEX_TIP_LINK, "link6")[
-        :3, 3
-    ]
-    thumb_tip_eef = urdf.get_transform(ALLEGRO_V5_THUMB_TIP_LINK, "link6")[
-        :3, 3
-    ]
+    index_tip_eef = urdf.get_transform(ALLEGRO_V5_INDEX_TIP_LINK, "link6")[:3, 3]
+    thumb_tip_eef = urdf.get_transform(ALLEGRO_V5_THUMB_TIP_LINK, "link6")[:3, 3]
     midpoint = (index_tip_eef + thumb_tip_eef) * 0.5
     if midpoint.shape != (3,) or not np.all(np.isfinite(midpoint)):
         raise ValueError(f"invalid Allegro fingertip midpoint from {robot_urdf}")
@@ -530,7 +638,9 @@ def append_box_pink_transfer_and_release(
         )
     box_point = np.asarray(box_point_robot, dtype=np.float64).reshape(-1)
     if box_point.shape != (3,) or not np.all(np.isfinite(box_point)):
-        raise ValueError(f"box-pink point must be a finite xyz vector, got {box_point_robot}")
+        raise ValueError(
+            f"box-pink point must be a finite xyz vector, got {box_point_robot}"
+        )
     midpoint_eef = np.asarray(fingertip_midpoint_eef, dtype=np.float64).reshape(-1)
     if midpoint_eef.shape != (3,) or not np.all(np.isfinite(midpoint_eef)):
         raise ValueError(
@@ -545,15 +655,11 @@ def append_box_pink_transfer_and_release(
     # Triangulation contributes only the horizontal target.  The configured
     # release height is an absolute robot-frame z, independent of box_point.z.
     target_midpoint[2] = clearance_m
-    target_eef[:3, 3] = (
-        target_midpoint - target_eef[:3, :3] @ midpoint_eef
-    )
+    target_eef[:3, 3] = target_midpoint - target_eef[:3, :3] @ midpoint_eef
     vertical_target = current_eef.copy()
     vertical_target[2, 3] = target_eef[2, 3]
     vertical_distance = abs(float(target_eef[2, 3] - current_eef[2, 3]))
-    horizontal_distance = float(
-        np.linalg.norm(target_eef[:2, 3] - current_eef[:2, 3])
-    )
+    horizontal_distance = float(np.linalg.norm(target_eef[:2, 3] - current_eef[:2, 3]))
     transfer_distance = vertical_distance + horizontal_distance
     if transfer_distance > max_translation_m:
         raise RuntimeError(
@@ -619,9 +725,7 @@ def append_box_pink_transfer_and_release(
     )
 
     release_count = max(1, int(np.ceil(release_seconds * rate_hz)))
-    release_alphas = np.linspace(
-        0.0, 1.0, release_count + 1, dtype=np.float64
-    )[1:]
+    release_alphas = np.linspace(0.0, 1.0, release_count + 1, dtype=np.float64)[1:]
     closed_hand = trajectory.hand_actions[-1]
     open_hand = np.zeros(16, dtype=np.float64)
     release_hands = (
@@ -826,10 +930,15 @@ def replay_closest_episode_into_box_pink(
     hand: Any | None = None,
     episodes: Iterable[core.Episode] | None = None,
 ) -> Path:
-    """Replay through the EEF apex, move above box-pink, and release."""
+    """Replay through the EEF apex, move to a placement target, and release."""
 
     if (arm is None) != (hand is None):
         raise ValueError("arm and hand controllers must be supplied together")
+    placement_target_name = (
+        str(getattr(args, "placement_target_name", "box_pink")).strip().lower()
+    )
+    if placement_target_name not in ("box_pink", "pink_box", "cutting_board"):
+        raise ValueError(f"unsupported placement target {placement_target_name!r}")
     candidate_episodes = (
         load_candidate_episodes(args.episode_root, args.candidate_episodes)
         if episodes is None
@@ -923,7 +1032,12 @@ def replay_closest_episode_into_box_pink(
 
     output_dir = Path(args.replay_output_dir).expanduser()
     output_dir.mkdir(parents=True, exist_ok=True)
-    plan_path = output_dir / "box_pink_replay_plan.npz"
+    plan_stem = (
+        "box_pink"
+        if placement_target_name in ("box_pink", "pink_box")
+        else placement_target_name
+    )
+    plan_path = output_dir / f"{plan_stem}_replay_plan.npz"
     object_delta = current_object_robot @ np.linalg.inv(selected.source_object_robot)
     box_point = np.asarray(box_point_robot, dtype=np.float64).reshape(3)
     np.savez_compressed(
@@ -949,6 +1063,9 @@ def replay_closest_episode_into_box_pink(
         current_c2r=current_c2r,
         box_pink_point_robot=box_point,
         box_pink_clearance_m=args.box_pink_clearance_m,
+        placement_target_name=placement_target_name,
+        placement_target_point_robot=box_point,
+        placement_target_z_m=args.box_pink_clearance_m,
         box_pink_target_eef_robot=box_transfer.target_eef_robot,
         apex_fingertip_midpoint_eef=box_transfer.fingertip_midpoint_eef,
         box_pink_target_fingertip_midpoint_robot=(
@@ -985,7 +1102,7 @@ def replay_closest_episode_into_box_pink(
     )
     print(f"[plan] saved {plan_path}")
     print(
-        f"[box-pink] thumb-index midpoint target xyz "
+        f"[{placement_target_name}] thumb-index midpoint target xyz "
         f"{np.round(box_transfer.target_fingertip_midpoint_robot, 4).tolist()} "
         f"-> compensated EEF xyz "
         f"{np.round(box_transfer.target_eef_robot[:3, 3], 4).tolist()}: "

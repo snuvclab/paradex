@@ -33,7 +33,10 @@ try:
         date_str = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
         save_current_camparam(os.path.join(shared_dir, args.save_path, date_str))
         print(f"Capturing image to {args.save_path}/{date_str}")
-        rcc.start("image", True, f'shared_data/{args.save_path}/{date_str}/raw')
+        # This command does not start the external UTG.  Aravis image mode
+        # therefore has to use free-running acquisition; sync mode would wait
+        # for a hardware trigger inside start() and eventually time out.
+        rcc.start("image", False, f'shared_data/{args.save_path}/{date_str}/raw')
         rcc.stop()
         save_event.clear()
         

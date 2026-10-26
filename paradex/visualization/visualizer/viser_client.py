@@ -54,13 +54,43 @@ class ViserClient:
             "qpos": np.asarray(qpos, dtype=np.float32),
         })
 
-    def set_traj(self, traj: np.ndarray, name: str = "traj",
-                 robot_name: str = "robot") -> Dict[str, Any]:
+    def set_static_robot(
+        self,
+        name: str,
+        urdf_path: str,
+        pose: np.ndarray,
+        qpos: np.ndarray,
+        *,
+        show_only: bool = False,
+    ) -> Dict[str, Any]:
+        return self._call({
+            "cmd": "set_static_robot",
+            "name": str(name),
+            "urdf_path": str(urdf_path),
+            "pose": np.asarray(pose, dtype=np.float32),
+            "qpos": np.asarray(qpos, dtype=np.float32),
+            "show_only": bool(show_only),
+        })
+
+    def show_only_robot(self, name: str) -> Dict[str, Any]:
+        return self._call({"cmd": "show_only_robot", "name": str(name)})
+
+    def set_traj(
+        self,
+        traj: np.ndarray,
+        name: str = "traj",
+        robot_name: str = "robot",
+        robot_pose_traj: Optional[Dict[str, np.ndarray]] = None,
+    ) -> Dict[str, Any]:
         return self._call({
             "cmd": "set_traj",
             "name": str(name),
             "robot_name": str(robot_name),
             "traj": np.asarray(traj, dtype=np.float32),
+            "robot_pose_traj": {
+                str(key): np.asarray(value, dtype=np.float32)
+                for key, value in (robot_pose_traj or {}).items()
+            },
         })
 
     def clear_objects(self) -> Dict[str, Any]:

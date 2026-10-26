@@ -1,0 +1,2 @@
+RUNNER: started (hang=True)
+/bin/bash: line 1: 1692263 Killed                  bash -c '/home/temp_id/anaconda3/bin/python /tmp/rdx_mock_runner.py robustdex_deploy.runner hang'

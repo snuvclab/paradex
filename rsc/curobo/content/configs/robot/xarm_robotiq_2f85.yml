@@ -1,0 +1,222 @@
+robot_cfg:
+  kinematics:
+    use_usd_kinematics: false
+    usd_path: ''
+    usd_robot_root: ''
+    isaac_usd_path: ''
+    usd_flip_joints: {}
+    usd_flip_joint_limits: []
+    urdf_path: xarm_robotiq_2f_85.urdf
+    asset_root_path: rsc/robot
+    base_link: link_base
+    ee_link: robotiq_85_base_link
+    link_names:
+    - link1
+    - link2
+    - link3
+    - link4
+    - link5
+    - link6
+    - robotiq_85_base_link
+    - robotiq_85_left_knuckle_link
+    - robotiq_85_right_knuckle_link
+    - robotiq_85_left_finger_link
+    - robotiq_85_right_finger_link
+    - robotiq_85_left_inner_knuckle_link
+    - robotiq_85_right_inner_knuckle_link
+    - robotiq_85_left_finger_tip_link
+    - robotiq_85_right_finger_tip_link
+    collision_link_names:
+    - link1
+    - link2
+    - link3
+    - link4
+    - link5
+    - link6
+    - robotiq_85_base_link
+    - robotiq_85_left_knuckle_link
+    - robotiq_85_right_knuckle_link
+    - robotiq_85_left_finger_link
+    - robotiq_85_right_finger_link
+    - robotiq_85_left_inner_knuckle_link
+    - robotiq_85_right_inner_knuckle_link
+    - robotiq_85_left_finger_tip_link
+    - robotiq_85_right_finger_tip_link
+    collision_spheres: rsc/curobo/content/configs/robot/spheres/xarm_robotiq_2f85.yml
+    collision_sphere_buffer: 0.0
+    self_collision_ignore:
+      link_base:
+      - link1
+      link1:
+      - link2
+      link2:
+      - link3
+      link3:
+      - link4
+      link4:
+      - link5
+      link5:
+      - link6
+      link6: []
+      robotiq_85_base_link:
+      - robotiq_85_left_knuckle_link
+      - robotiq_85_right_knuckle_link
+      - robotiq_85_left_finger_link
+      - robotiq_85_right_finger_link
+      - robotiq_85_left_inner_knuckle_link
+      - robotiq_85_right_inner_knuckle_link
+      - robotiq_85_left_finger_tip_link
+      - robotiq_85_right_finger_tip_link
+      - link6
+      robotiq_85_left_knuckle_link:
+      - robotiq_85_base_link
+      - robotiq_85_right_knuckle_link
+      - robotiq_85_left_finger_link
+      - robotiq_85_right_finger_link
+      - robotiq_85_left_inner_knuckle_link
+      - robotiq_85_right_inner_knuckle_link
+      - robotiq_85_left_finger_tip_link
+      - robotiq_85_right_finger_tip_link
+      - link6
+      robotiq_85_right_knuckle_link:
+      - robotiq_85_base_link
+      - robotiq_85_left_knuckle_link
+      - robotiq_85_left_finger_link
+      - robotiq_85_right_finger_link
+      - robotiq_85_left_inner_knuckle_link
+      - robotiq_85_right_inner_knuckle_link
+      - robotiq_85_left_finger_tip_link
+      - robotiq_85_right_finger_tip_link
+      - link6
+      robotiq_85_left_finger_link:
+      - robotiq_85_base_link
+      - robotiq_85_left_knuckle_link
+      - robotiq_85_right_knuckle_link
+      - robotiq_85_right_finger_link
+      - robotiq_85_left_inner_knuckle_link
+      - robotiq_85_right_inner_knuckle_link
+      - robotiq_85_left_finger_tip_link
+      - robotiq_85_right_finger_tip_link
+      - link6
+      robotiq_85_right_finger_link:
+      - robotiq_85_base_link
+      - robotiq_85_left_knuckle_link
+      - robotiq_85_right_knuckle_link
+      - robotiq_85_left_finger_link
+      - robotiq_85_left_inner_knuckle_link
+      - robotiq_85_right_inner_knuckle_link
+      - robotiq_85_left_finger_tip_link
+      - robotiq_85_right_finger_tip_link
+      - link6
+      robotiq_85_left_inner_knuckle_link:
+      - robotiq_85_base_link
+      - robotiq_85_left_knuckle_link
+      - robotiq_85_right_knuckle_link
+      - robotiq_85_left_finger_link
+      - robotiq_85_right_finger_link
+      - robotiq_85_right_inner_knuckle_link
+      - robotiq_85_left_finger_tip_link
+      - robotiq_85_right_finger_tip_link
+      - link6
+      robotiq_85_right_inner_knuckle_link:
+      - robotiq_85_base_link
+      - robotiq_85_left_knuckle_link
+      - robotiq_85_right_knuckle_link
+      - robotiq_85_left_finger_link
+      - robotiq_85_right_finger_link
+      - robotiq_85_left_inner_knuckle_link
+      - robotiq_85_left_finger_tip_link
+      - robotiq_85_right_finger_tip_link
+      - link6
+      robotiq_85_left_finger_tip_link:
+      - robotiq_85_base_link
+      - robotiq_85_left_knuckle_link
+      - robotiq_85_right_knuckle_link
+      - robotiq_85_left_finger_link
+      - robotiq_85_right_finger_link
+      - robotiq_85_left_inner_knuckle_link
+      - robotiq_85_right_inner_knuckle_link
+      - robotiq_85_right_finger_tip_link
+      - link6
+      robotiq_85_right_finger_tip_link:
+      - robotiq_85_base_link
+      - robotiq_85_left_knuckle_link
+      - robotiq_85_right_knuckle_link
+      - robotiq_85_left_finger_link
+      - robotiq_85_right_finger_link
+      - robotiq_85_left_inner_knuckle_link
+      - robotiq_85_right_inner_knuckle_link
+      - robotiq_85_left_finger_tip_link
+      - link6
+    self_collision_buffer:
+      link1: 0
+      link2: 0
+      link3: 0
+      link4: 0
+      link5: 0
+      link6: 0
+      robotiq_85_base_link: -0.005
+      robotiq_85_left_knuckle_link: -0.005
+      robotiq_85_right_knuckle_link: -0.005
+      robotiq_85_left_finger_link: -0.005
+      robotiq_85_right_finger_link: -0.005
+      robotiq_85_left_inner_knuckle_link: -0.005
+      robotiq_85_right_inner_knuckle_link: -0.005
+      robotiq_85_left_finger_tip_link: -0.005
+      robotiq_85_right_finger_tip_link: -0.005
+    use_global_cumul: true
+    mesh_link_names:
+    - link_base
+    - link1
+    - link2
+    - link3
+    - link4
+    - link5
+    - link6
+    - robotiq_85_base_link
+    - robotiq_85_left_knuckle_link
+    - robotiq_85_right_knuckle_link
+    - robotiq_85_left_finger_link
+    - robotiq_85_right_finger_link
+    - robotiq_85_left_inner_knuckle_link
+    - robotiq_85_right_inner_knuckle_link
+    - robotiq_85_left_finger_tip_link
+    - robotiq_85_right_finger_tip_link
+    lock_joints:
+      robotiq_85_left_knuckle_joint: 0.0
+    cspace:
+      joint_names:
+      - joint1
+      - joint2
+      - joint3
+      - joint4
+      - joint5
+      - joint6
+      - robotiq_85_left_knuckle_joint
+      retract_config:
+      - -1.26711
+      - -0.20246
+      - -1.13621
+      - 2.33176
+      - 0.32289
+      - 2.36492
+      - 0.0
+      cspace_distance_weight:
+      - 1
+      - 1
+      - 1
+      - 1
+      - 1
+      - 1
+      - 1
+      null_space_weight:
+      - 0
+      - 0
+      - 0
+      - 0
+      - 0
+      - 0
+      - 0
+      max_jerk: 500.0
+      max_acceleration: 15.0
+    external_asset_path: rsc/curobo/content/assets/robot/inspire_description

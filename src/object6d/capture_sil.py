@@ -43,7 +43,7 @@ DEFAULT_RETRIEVAL_TRANSLATION_SCALE_M = 0.05
 DEFAULT_RETRIEVAL_ROTATION_SCALE_RAD = 0.25
 
 
-def parse_args() -> argparse.Namespace:
+def build_arg_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         description="Capture images, run remote Object6D, and show the pose in Viser."
     )
@@ -252,7 +252,11 @@ def parse_args() -> argparse.Namespace:
         help="maximum faces per robot link sent to Viser; 0 disables simplification",
     )
     parser.add_argument("--no-viser-object-align", action="store_true")
-    return parser.parse_args()
+    return parser
+
+
+def parse_args(argv: Optional[list[str]] = None) -> argparse.Namespace:
+    return build_arg_parser().parse_args(argv)
 
 
 def validate_args(args: argparse.Namespace) -> None:
@@ -780,7 +784,11 @@ def _preload_replay_episodes(args: argparse.Namespace) -> list[replay_core.Episo
         f"[preload] loading {len(args.candidate_episodes)} candidate episode(s) "
         "from shared storage."
     )
-    episodes = load_candidate_episodes(args.episode_root, args.candidate_episodes)
+    episodes = load_candidate_episodes(
+        args.episode_root,
+        args.candidate_episodes,
+        robot=args.robot,
+    )
     print(
         f"[preload] {len(episodes)} candidate episode(s) ready in "
         f"{time.perf_counter() - started:.3f}s."

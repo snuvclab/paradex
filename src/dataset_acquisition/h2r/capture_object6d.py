@@ -9,7 +9,7 @@ import datetime
 import json
 import os
 import time
-from typing import Any, Dict
+from typing import Any, Dict, Optional
 
 import numpy as np
 import trimesh
@@ -22,6 +22,28 @@ from paradex.visualization.robot import RobotModule
 from paradex.visualization.visualizer.viser import ViserViewer
 
 import pose_normalize
+from hrdex_replay_common import (
+    XArmJointWatchdog,
+    arm_link_pose_trajectory,
+    assert_arm_joint_limits,
+    assert_bounded_joint_steps,
+    assert_bounded_pose_steps,
+    curobo_active_joint_names,
+    densify_timed_commands,
+    end_effector_poses_to_command_link,
+    interpolate_joint_anchors,
+    move_xarm_home_safely,
+    pack_frame_to_pose_frame,
+    resolve_pose_mesh,
+    resolve_scene_arg,
+    retime_step_periods,
+    select_curobo_active_qpos,
+    sparse_waypoint_indices,
+    staged_home_to_pregrasp,
+    trajectory_phase,
+    unwrap_xarm_joints,
+    validate_motion_args,
+)
 
 DEFAULT_ROBOT_URDF = str(
     PROJECT_ROOT / "rsc" / "curobo" / "content" / "assets" / "robot"
@@ -91,9 +113,25 @@ def _extract_pose_response(res: Dict[str, Any]) -> Dict[str, Any]:
     return out
 
 
-def _resolve_mesh_path(mesh_name: str, mesh_root_dir: str) -> str:
-    # local load uses the viser-aligned mesh
-    return os.path.join(mesh_root_dir, mesh_name, f"{mesh_name}_viser.obj")
+def _resolve_mesh_path(mesh_name: str, mesh_root_dir: str, frame: str = "original") -> str:
+    """Mesh matching the frame the 6D pose RPC reports: raw <obj>.obj (FoundationPose,
+    ``original``) or the viser-aligned <obj>_viser.obj (``viser``)."""
+    return resolve_pose_mesh(mesh_root_dir, mesh_name, frame)
+
+
+def _pack_frame_to_pose_frame(d, pose_mesh_frame: str) -> np.ndarray:
+    """4x4 that re-expresses packed wrists in the frame of the 6D pose estimate.
+
+    Packs record ``wrist_frame_id`` ('original' = raw <obj>.obj frame, or
+    'canonical' = viser-aligned <obj>_viser.obj frame) and ``viser_align``
+    (T_viser_from_original).  The pose RPC reports the object in
+    ``pose_mesh_frame``; a mismatch is bridged with viser_align.
+    """
+    pack_frame = str(d["wrist_frame_id"]) if "wrist_frame_id" in d.files else "canonical"
+    F = pack_frame_to_pose_frame(d, pose_mesh_frame)
+    print(f"[pipe] wrist frame: pack='{pack_frame}', pose='{pose_mesh_frame}' -> "
+          f"{'identity' if np.allclose(F, np.eye(4)) else 'viser_align bridge'}")
+    return F.astype(np.float64)
 
 
 def _add_debug_images_to_gui(
@@ -203,7 +241,13 @@ def _load_mesh(mesh_path: str) -> trimesh.Trimesh:
 
 
 def _solve_ik_chain_curobo(robot_cfg: Dict[str, Any], target_poses: np.ndarray,
-                           seed_arm_qpos: np.ndarray, device: str = "cuda:0"):
+                           seed_arm_qpos: np.ndarray, device: str = "cuda:0",
+                           num_seeds: int = 32, null_space_weight: float = 1.0,
+                           self_collision: bool = True,
+                           position_threshold: float = 0.005,
+                           rotation_threshold: float = 0.05,
+                           sample_stride: int = 10,
+                           world_cfg_dict: Optional[Dict[str, Any]] = None):
     """Per-waypoint IK with continuity warm-start. Sets up curobo IKSolver
     once and calls solve_single in a loop, feeding the previous solution as
     the seed for the next.
@@ -213,29 +257,51 @@ def _solve_ik_chain_curobo(robot_cfg: Dict[str, Any], target_poses: np.ndarray,
     returns: (W, active_dof) IK solutions; failures hold the previous solution.
     """
     sys.path.insert(0, str(PROJECT_ROOT / "curobo" / "src"))
+    import copy
     import torch
     from curobo.types.base import TensorDeviceType
     from curobo.types.math import Pose
     from curobo.wrap.reacher.ik_solver import IKSolver, IKSolverConfig
     from object6d.capture_rcc import _rotmat_to_wxyz
 
+    robot_cfg = copy.deepcopy(robot_cfg)
+    cspace = robot_cfg["robot_cfg"]["kinematics"]["cspace"]
+    cspace["null_space_weight"] = [float(null_space_weight)] * len(cspace["joint_names"])
     dev = torch.device(device if ("cuda" in str(device) and torch.cuda.is_available()) else "cpu")
     tensor_args = TensorDeviceType(device=dev)
+    world_cfg = None
+    if world_cfg_dict is not None:
+        from curobo.geom.types import WorldConfig
+        world_cfg = WorldConfig.from_dict(world_cfg_dict)
     ik_cfg = IKSolverConfig.load_from_robot_config(
-        robot_cfg, None, tensor_args=tensor_args,
-        num_seeds=32, position_threshold=0.005, rotation_threshold=0.1,
-        self_collision_check=True, self_collision_opt=True,
+        robot_cfg, world_cfg, tensor_args=tensor_args,
+        num_seeds=int(num_seeds), position_threshold=float(position_threshold),
+        rotation_threshold=float(rotation_threshold),
+        self_collision_check=bool(self_collision), self_collision_opt=bool(self_collision),
         use_cuda_graph=False,
     )
     ik = IKSolver(ik_cfg)
 
     W = int(target_poses.shape[0])
-    dof = int(np.asarray(seed_arm_qpos).reshape(-1).shape[0])
-    out = np.zeros((W, dof), dtype=np.float32)
-    last = np.asarray(seed_arm_qpos, dtype=np.float32).copy()
+    solver_joint_names = list(ik.joint_names)
+    configured_active_names = curobo_active_joint_names(robot_cfg)
+    if solver_joint_names != configured_active_names:
+        raise RuntimeError(
+            "CuRobo active joint order differs from config: "
+            f"solver={solver_joint_names}, config={configured_active_names}"
+        )
+    last = select_curobo_active_qpos(seed_arm_qpos, robot_cfg, solver_joint_names)
+    dof = len(solver_joint_names)
+    sample_indices = sparse_waypoint_indices(W, sample_stride)
+    anchors = np.zeros((len(sample_indices), dof), dtype=np.float32)
 
     n_succ = 0
-    for i in range(W):
+    if W > 0:
+        anchors[0] = last
+        n_succ = 1
+    fallback_count = 0
+    progress_every = max(1, len(sample_indices) // 10)
+    for anchor_i, i in enumerate(sample_indices[1:], start=1):
         T = target_poses[i]
         wxyz = _rotmat_to_wxyz(T[:3, :3])
         pose = Pose(
@@ -244,15 +310,33 @@ def _solve_ik_chain_curobo(robot_cfg: Dict[str, Any], target_poses: np.ndarray,
         )
         seed_t = torch.tensor(last, device=dev, dtype=torch.float32).view(1, 1, dof)
         retract_t = torch.tensor(last, device=dev, dtype=torch.float32).view(1, dof)
-        result = ik.solve_single(pose, retract_config=retract_t, seed_config=seed_t)
+        result = ik.solve_single(
+            pose, retract_config=retract_t, seed_config=seed_t, num_seeds=1
+        )
         succ = bool(result.success.flatten()[0].item()) if hasattr(result.success, "flatten") else bool(result.success)
+        if not succ and num_seeds > 1:
+            fallback_count += 1
+            result = ik.solve_single(
+                pose,
+                retract_config=retract_t,
+                seed_config=seed_t,
+                num_seeds=int(num_seeds),
+            )
+            succ = bool(result.success.flatten()[0].item()) if hasattr(result.success, "flatten") else bool(result.success)
         if succ:
             sol = result.solution.detach().cpu().numpy().reshape(-1)[:dof]
             last = sol.astype(np.float32)
             n_succ += 1
-        out[i] = last
-    print(f"[IK chain] {n_succ}/{W} succeeded")
-    return out
+        anchors[anchor_i] = last
+        if anchor_i % progress_every == 0 or anchor_i == len(sample_indices) - 1:
+            print(f"[IK preview] {anchor_i + 1}/{len(sample_indices)} anchors processed, "
+                  f"{n_succ} accepted, "
+                  f"full-seed retries={fallback_count}")
+    out = interpolate_joint_anchors(sample_indices, anchors, W)
+    accepted = W if n_succ == len(sample_indices) else n_succ
+    print(f"[IK preview] solved {n_succ}/{len(sample_indices)} anchors for {W} frames "
+          f"(stride={sample_stride}); full-seed retries={fallback_count}")
+    return out, accepted
 
 
 # Order on the wire (matches /right/joint_states' name list and what the
@@ -312,6 +396,43 @@ def _hand_qpos_to_inspire_msg(full_qpos: np.ndarray, full_joint_names) -> np.nda
     return out
 
 
+# ---- Inspire DFTP (serial Inspire protocol via get_hand("inspire_dftp")) ----
+# Six angle registers 0..1000 (1000 = fully open, 0 = fully closed) in the
+# controller channel order of src/util/inspire/inspire_dftp_calibration/core.py.
+# The URDF driver joints are normalized by their DFTP URDF upper limits.
+DFTP_ROBOT_URDF = str(PROJECT_ROOT / "rsc" / "robot" / "xarm_inspire_DFTP.urdf")
+DFTP_CUROBO_ROBOT_CFG = str(PROJECT_ROOT / "rsc" / "curobo" / "content" / "configs" / "robot"
+                            / "xarm_inspire_dftp.yml")
+DFTP_CHANNEL_JOINTS = [
+    "right_little_1_joint", "right_ring_1_joint", "right_middle_1_joint",
+    "right_index_1_joint", "right_thumb_2_joint", "right_thumb_1_joint",
+]
+DFTP_RAW_OPEN = 1000.0
+DFTP_RAW_CLOSE = 0.0
+DFTP_Q_UPPER = {
+    "right_thumb_1_joint": 1.15, "right_thumb_2_joint": 0.55,
+    "right_index_1_joint": 1.6, "right_middle_1_joint": 1.6,
+    "right_ring_1_joint": 1.6, "right_little_1_joint": 1.6,
+}
+
+
+def _hand_qpos_to_dftp_msg(full_qpos: np.ndarray, full_joint_names) -> np.ndarray:
+    """URDF rad -> 6 DFTP angle registers in controller channel order."""
+    idx = {n: i for i, n in enumerate(full_joint_names)}
+    out = np.zeros(6, dtype=np.float64)
+    for i, name in enumerate(DFTP_CHANNEL_JOINTS):
+        t = float(np.clip(float(full_qpos[idx[name]]) / DFTP_Q_UPPER[name], 0.0, 1.0))
+        out[i] = float(np.clip(np.rint(DFTP_RAW_OPEN + (DFTP_RAW_CLOSE - DFTP_RAW_OPEN) * t),
+                               0.0, 1000.0))
+    return out
+
+
+def _hand_qpos_to_msg(args, full_qpos: np.ndarray, full_joint_names) -> np.ndarray:
+    if getattr(args, "hand_type", "inspire_f1") == "inspire_dftp":
+        return _hand_qpos_to_dftp_msg(full_qpos, full_joint_names)
+    return _hand_qpos_to_inspire_msg(full_qpos, full_joint_names)
+
+
 def _wait_xarm_at_target(xarm, target_rad: np.ndarray, tol_rad: float, timeout: float) -> bool:
     deadline = time.time() + float(timeout)
     while time.time() < deadline:
@@ -340,11 +461,14 @@ def _execute_on_real_robot(args, pipeline_result: Dict[str, Any], robot_module: 
     # arm: joint1..joint6 indices in URDF order
     arm_idx = [full_joint_names.index(f"joint{i}") for i in range(1, 7)]
     arm_traj = full_traj[:, arm_idx]  # (T,6) rad
+    arm_pose_traj = np.asarray(pipeline_result["arm_pose_traj"], dtype=np.float64)
 
     # hand: raw counts in WIRE order [thumb_1, thumb_2, index, middle, ring, little]
     hand_msgs = np.zeros((Tn, 6), dtype=np.float64)
     for t in range(Tn):
-        hand_msgs[t] = _hand_qpos_to_inspire_msg(full_traj[t], full_joint_names)
+        hand_msgs[t] = _hand_qpos_to_msg(args, full_traj[t], full_joint_names)
+    is_dftp = getattr(args, "hand_type", "inspire_f1") == "inspire_dftp"
+    raw_hi = 1000.0 if is_dftp else 1800.0
 
     # Grasp squeeze: run the whole grasp sequence (approach + hand_interp +
     # replay) with the planned hand values UNCHANGED. Once the grasp is done we
@@ -360,9 +484,13 @@ def _execute_on_real_robot(args, pipeline_result: Dict[str, Any], robot_module: 
     do_squeeze = squeeze_amt != 0.0 and 0 < squeeze_start < Tn
     if do_squeeze:
         # hold + lift frames keep the squeezed pose (thumb_1 / col 0 untouched).
-        hand_msgs[squeeze_start:, 1:] = np.clip(
-            hand_msgs[squeeze_start:, 1:] - squeeze_amt, 0.0, 1800.0
-        )
+        if is_dftp:  # channel 5 is thumb rotation; keep it, squeeze the rest
+            hand_msgs[squeeze_start:, :5] = np.clip(
+                hand_msgs[squeeze_start:, :5] - squeeze_amt, 0.0, raw_hi)
+        else:
+            hand_msgs[squeeze_start:, 1:] = np.clip(
+                hand_msgs[squeeze_start:, 1:] - squeeze_amt, 0.0, raw_hi
+            )
         print(f"[exec] grasp squeeze -{squeeze_amt:.0f} over {squeeze_steps} "
               f"frames after frame {squeeze_start} (thumb_1 excluded)")
 
@@ -373,14 +501,42 @@ def _execute_on_real_robot(args, pipeline_result: Dict[str, Any], robot_module: 
     replay_lo, replay_hi = n_a + n_b, n_a + n_b + n_r
     if replay_hi > replay_lo:
         periods[replay_lo:replay_hi] = 1.0 / float(args.replay_rate_hz)
+    nominal_duration = float(np.sum(periods))
+    periods, retimed_steps, max_stretch = retime_step_periods(
+        arm_traj,
+        arm_pose_traj,
+        periods,
+        max_joint_speed_deg_s=float(args.max_planned_joint_speed_deg_s),
+        max_linear_speed_mps=float(args.max_cartesian_linear_speed_mps),
+        max_angular_speed_rps=float(args.max_cartesian_angular_speed_rps),
+    )
+    if retimed_steps:
+        print(f"[exec] safety retiming: slowed {retimed_steps} transitions, "
+              f"max {max_stretch:.2f}x, duration {nominal_duration:.1f}s "
+              f"-> {np.sum(periods):.1f}s")
+    assert_bounded_pose_steps(
+        arm_pose_traj,
+        rate_hz=1.0,
+        max_linear_speed_mps=float(args.max_cartesian_linear_speed_mps),
+        max_angular_speed_rps=float(args.max_cartesian_angular_speed_rps),
+        step_periods=periods,
+    )
+    assert_bounded_joint_steps(
+        arm_traj,
+        periods,
+        max_joint_speed_deg_s=float(args.max_planned_joint_speed_deg_s),
+    )
     print(f"[exec] replay segment frames {replay_lo}..{replay_hi - 1} "
           f"@ {args.replay_rate_hz} Hz (rest @ {args.rate_hz} Hz)")
 
     home_rad = np.deg2rad(np.asarray(args.home_deg, dtype=np.float64))
-    if not np.allclose(arm_traj[0], home_rad, atol=1e-3):
+    arm0_home_equivalent = home_rad + np.arctan2(
+        np.sin(arm_traj[0] - home_rad), np.cos(arm_traj[0] - home_rad)
+    )
+    if not np.allclose(arm0_home_equivalent, home_rad, atol=1e-3):
         print(f"[exec] WARNING: traj[0] arm != HOME; traj[0]={arm_traj[0]}")
     print(f"[exec] T={Tn}, rate={args.rate_hz} Hz (~{Tn / args.rate_hz:.1f}s)")
-    print(f"[exec] arm[0] deg: {np.rad2deg(arm_traj[0]).round(2).tolist()}")
+    print(f"[exec] arm[0] deg: {np.rad2deg(arm0_home_equivalent).round(2).tolist()}")
     print(f"[exec] hand[0] raw  [thumb1,thumb2,idx,mid,ring,little]: {hand_msgs[0].tolist()}")
     print(f"[exec] hand[{Tn-1}] raw [thumb1,thumb2,idx,mid,ring,little]: {hand_msgs[-1].tolist()}")
 
@@ -399,50 +555,94 @@ def _execute_on_real_robot(args, pipeline_result: Dict[str, Any], robot_module: 
         print("[exec] pre-roll: 3s before motion ...")
         time.sleep(3.0)
 
-    print("[exec] init xarm (servo_api=angle_j)...")
-    xarm = get_arm("xarm", servo_api="angle_j")
-    print(f"[exec] init inspire_f1 (hand_side={args.hand_side})...")
-    hand = get_hand("inspire_f1", hand_side=args.hand_side)
+    print(f"[exec] init xarm (servo_api=angle_j, "
+          f"command_rate={args.arm_servo_rate_hz:.1f} Hz)...")
+    xarm = get_arm(
+        "xarm",
+        servo_api="angle_j",
+        fps=float(args.arm_servo_rate_hz),
+    )
+    if is_dftp:
+        print("[exec] init inspire_dftp (serial InspireController; registers 0..1000)...")
+        hand = get_hand("inspire_dftp")
 
-    # The state_receiver's move() reverses the array AND swaps thumb_1<->thumb_2.
-    # We bypass it and publish to its cmd_pubs[side] directly with the wire-order
-    # array [thumb_1, thumb_2, index, middle, ring, little].
-    from std_msgs.msg import Float64MultiArray
-    hand_pub = hand.cmd_pubs[args.hand_side]
+        def _send_hand(raw_regs: np.ndarray) -> None:
+            hand.move(np.asarray(np.rint(raw_regs), dtype=np.int64))
+    else:
+        print(f"[exec] init inspire_f1 (hand_side={args.hand_side})...")
+        hand = get_hand("inspire_f1", hand_side=args.hand_side)
 
-    def _send_hand(raw_wire: np.ndarray) -> None:
-        msg = Float64MultiArray()
-        msg.data = [float(x) for x in raw_wire]
-        hand_pub.publish(msg)
+        # The state_receiver's move() reverses the array AND swaps thumb_1<->thumb_2.
+        # We bypass it and publish to its cmd_pubs[side] directly with the wire-order
+        # array [thumb_1, thumb_2, index, middle, ring, little].
+        from std_msgs.msg import Float64MultiArray
+        hand_pub = hand.cmd_pubs[args.hand_side]
+
+        def _send_hand(raw_wire: np.ndarray) -> None:
+            msg = Float64MultiArray()
+            msg.data = [float(x) for x in raw_wire]
+            hand_pub.publish(msg)
 
     try:
         # Phase 0: home + open hand, wait for arrival.
         print(f"[exec] commanding HOME deg={list(np.rad2deg(home_rad).round(2))} + hand[0]={hand_msgs[0].tolist()}")
-        xarm.move(home_rad, is_servo=True)
+        move_xarm_home_safely(
+            xarm,
+            home_rad,
+            max_joint_speed_deg_s=float(args.home_max_joint_speed_deg_s),
+            stream_hz=float(args.home_preposition_hz),
+        )
         _send_hand(hand_msgs[0])
         ok = _wait_xarm_at_target(xarm, home_rad,
                                   np.deg2rad(float(args.home_tol_deg)),
                                   float(args.home_timeout))
         if not ok:
-            print(f"[exec] WARNING: arm did not reach HOME within {args.home_timeout}s")
+            raise RuntimeError(f"arm did not reach HOME within {args.home_timeout}s")
         if xarm.is_error() or hand.is_error():
             raise RuntimeError("controller in error state before streaming")
+        watchdog = XArmJointWatchdog(
+            robot_module,
+            max_speed_deg_s=float(args.max_measured_joint_speed_deg_s),
+            limit_margin_rad=float(args.live_joint_limit_margin_rad),
+        )
+        watchdog.check(xarm, context="initialization")
+
+        def _stream_joint_range(start: int, stop: int) -> None:
+            if stop <= start:
+                return
+            commands = np.concatenate(
+                (arm_traj[start:stop], hand_msgs[start:stop]), axis=1
+            )
+            dense, dense_periods, source_frames = densify_timed_commands(
+                commands,
+                periods[start:stop],
+                command_rate_hz=float(args.arm_servo_rate_hz),
+            )
+            source_frames += start
+            t0 = time.perf_counter()
+            clock = 0.0
+            for command, period, frame in zip(dense, dense_periods, source_frames):
+                frame = int(frame)
+                watchdog.check(
+                    xarm,
+                    context=(
+                        f"frame={frame}, phase={trajectory_phase(frame, pipeline_result)}"
+                    ),
+                )
+                xarm.move(command[:6], is_servo=True)
+                _send_hand(command[6:])
+                if xarm.is_error() or hand.is_error():
+                    raise RuntimeError(f"controller error at frame {frame}")
+                clock += float(period)
+                sleep_for = t0 + clock - time.perf_counter()
+                if sleep_for > 0:
+                    time.sleep(sleep_for)
 
         # Phase 1: grasp sequence -- stream frames up to the end of replay with
         # the planned hand values unchanged. Per-frame period from `periods`.
         grasp_end = squeeze_start if do_squeeze else Tn
         print(f"[exec] streaming grasp sequence: frames 0..{grasp_end - 1} ...")
-        t0 = time.perf_counter()
-        clock = 0.0
-        for t in range(grasp_end):
-            xarm.move(arm_traj[t], is_servo=True)
-            _send_hand(hand_msgs[t])
-            if xarm.is_error() or hand.is_error():
-                raise RuntimeError(f"controller error at frame {t}")
-            clock += periods[t]
-            sleep_for = t0 + clock - time.perf_counter()
-            if sleep_for > 0:
-                time.sleep(sleep_for)
+        _stream_joint_range(0, grasp_end)
 
         # Phase 1.5: explicit squeeze -- arm frozen at the last grasp pose,
         # hand ramps from the planned grasp pose to the squeezed pose.
@@ -452,6 +652,7 @@ def _execute_on_real_robot(args, pipeline_result: Dict[str, Any], robot_module: 
             arm_hold = arm_traj[squeeze_start - 1]
             print(f"[exec] squeezing hand over {squeeze_steps} frames ...")
             for s in range(1, squeeze_steps + 1):
+                watchdog.check(xarm, context=f"squeeze_step={s}")
                 a = float(s) / float(squeeze_steps)
                 cmd = (1.0 - a) * hand_from + a * hand_to
                 xarm.move(arm_hold, is_servo=True)
@@ -462,26 +663,56 @@ def _execute_on_real_robot(args, pipeline_result: Dict[str, Any], robot_module: 
 
             # Phase 2: hold + lift with the squeezed hand pose.
             print(f"[exec] streaming hold + lift: frames {squeeze_start}..{Tn - 1} ...")
-            t0 = time.perf_counter()
-            clock = 0.0
-            for t in range(squeeze_start, Tn):
-                xarm.move(arm_traj[t], is_servo=True)
-                _send_hand(hand_msgs[t])
-                if xarm.is_error() or hand.is_error():
-                    raise RuntimeError(f"controller error at frame {t}")
-                clock += periods[t]
-                sleep_for = t0 + clock - time.perf_counter()
-                if sleep_for > 0:
-                    time.sleep(sleep_for)
+            _stream_joint_range(squeeze_start, Tn)
         print("[exec] streaming done")
-        if cs is not None:
-            print("[exec] holding final pose for 10s of post-roll video ...")
-            time.sleep(10.0)
+        final_pose = arm_traj[-1]
+        final_hand = hand_msgs[-1]
+        post_lift_hold_seconds = float(args.post_lift_hold_seconds)
+        if post_lift_hold_seconds > 0:
+            print(f"[exec] holding lifted grasp for {post_lift_hold_seconds:.1f}s ...")
+            hold_deadline = time.perf_counter() + post_lift_hold_seconds
+            while time.perf_counter() < hold_deadline:
+                watchdog.check(xarm, context="post_lift_hold")
+                xarm.move(final_pose, is_servo=True)
+                _send_hand(final_hand)
+                if xarm.is_error() or hand.is_error():
+                    raise RuntimeError("controller error during post-lift grasp hold")
+                time.sleep(1.0 / float(args.rate_hz))
+
+        release_steps = int(args.release_steps)
+        if release_steps > 0:
+            open_hand = hand_msgs[0]
+            print(f"[exec] releasing grasp over {release_steps} frames ...")
+            for step in range(1, release_steps + 1):
+                watchdog.check(xarm, context=f"release_step={step}")
+                alpha = float(step) / float(release_steps)
+                _send_hand((1.0 - alpha) * final_hand + alpha * open_hand)
+                xarm.move(final_pose, is_servo=True)
+                if xarm.is_error() or hand.is_error():
+                    raise RuntimeError(f"controller error during release step {step}")
+                time.sleep(1.0 / float(args.rate_hz))
+            print("[exec] release done")
+
+        print("[exec] returning xArm to HOME after release ...")
+        move_xarm_home_safely(
+            xarm,
+            home_rad,
+            max_joint_speed_deg_s=float(args.return_home_max_joint_speed_deg_s),
+            stream_hz=float(args.home_preposition_hz),
+        )
+        if not _wait_xarm_at_target(
+            xarm,
+            home_rad,
+            np.deg2rad(float(args.home_tol_deg)),
+            float(args.home_timeout),
+        ):
+            raise RuntimeError(f"xArm did not return HOME within {args.home_timeout}s")
+        print("[exec] xArm returned HOME")
     finally:
-        try: xarm.end(set_break=False)
-        except Exception as e: print(f"[exec] xarm.end error: {e}")
         try: hand.end()
         except Exception as e: print(f"[exec] hand.end error: {e}")
+        try: xarm.end(set_break=False)
+        except Exception as e: print(f"[exec] xarm.end error: {e}")
         if cs is not None:
             try: cs.stop()
             except Exception as e: print(f"[exec] cs.stop error: {e}")
@@ -496,7 +727,7 @@ def _run_h2r_pipeline(args, mesh_name: str, pose_robot: np.ndarray,
                      robot_module: RobotModule, abs_save_path: str) -> Dict[str, Any]:
     """End-to-end h2r pipeline (xarm_inspire_f1):
 
-       Phase A: HOME -> wp0 (pregrasp) via curobo MotionGen
+       Phase A: HOME-height planar+rotate -> vertical pregrasp descent
        Phase B: per-waypoint IK to track the canonical wrist trajectory while
                 replaying finger qpos from result.npz
 
@@ -531,6 +762,7 @@ def _run_h2r_pipeline(args, mesh_name: str, pose_robot: np.ndarray,
     if not os.path.exists(res_path):
         raise FileNotFoundError(f"no packed result: {res_path}")
     d = np.load(res_path, allow_pickle=True)
+    pack_to_pose = _pack_frame_to_pose_frame(d, args.pose_mesh_frame)
     key = f"{args.src}_pregrasp_traj"
     if key not in d.files:
         raise KeyError(f"{key} missing in {res_path}")
@@ -546,21 +778,17 @@ def _run_h2r_pipeline(args, mesh_name: str, pose_robot: np.ndarray,
         Wc = np.eye(4, dtype=np.float32)
         Wc[:3, :3] = Rotation.from_euler("XYZ", w[3:6]).as_matrix()
         Wc[:3, 3] = w[:3]
-        wrist_T_robot[i] = (pose_robot @ Wc).astype(np.float32)
+        wrist_T_robot[i] = (pose_robot @ pack_to_pose @ Wc).astype(np.float32)
 
-    # ---- 3. HOME qpos in full URDF joint order. The hand is pre-shaped to the
-    # FIRST replay finger pose from the start, so there is no open->grasp
-    # interpolation after reaching pregrasp (the fingers are already in the
-    # grasp config during the whole approach).
+    # ---- 3. HOME qpos in full URDF joint order, with the hand fully open.
     full_joint_names = list(robot_module.get_joint_names())
     n_dof = int(robot_module.get_num_joints())
     name_to_full_idx = {n: i for i, n in enumerate(full_joint_names)}
     name_to_finger_idx = {n: i for i, n in enumerate(jnames_traj)}
     home_qpos_full = np.zeros(n_dof, dtype=np.float32)
     home_qpos_full[:6] = np.deg2rad(np.asarray(args.home_deg, dtype=np.float32))
-    for jn, fi in name_to_finger_idx.items():
-        if jn in name_to_full_idx:
-            home_qpos_full[name_to_full_idx[jn]] = float(traj_canon[0, 6 + fi])
+    matched_finger = sum(jn in name_to_full_idx for jn in name_to_finger_idx)
+    print(f"[pipe] finger mapping matched {matched_finger}/{len(jnames_traj)}; Stage A hand is open")
 
     # ---- 4. curobo robot_cfg (xarm_inspire_f1; cspace=12, active=6 arm)
     cfg_path = os.path.expanduser(args.curobo_robot_cfg)
@@ -568,9 +796,7 @@ def _run_h2r_pipeline(args, mesh_name: str, pose_robot: np.ndarray,
         raise FileNotFoundError(f"curobo cfg not found: {cfg_path}")
     robot_cfg = _normalize_curobo_robot_cfg_paths_with_cfg_file(load_yaml(cfg_path), cfg_path)
     robot_cfg = _normalize_curobo_robot_cfg_paths(robot_cfg)
-    # The cfg locks the 6 hand joints (open). Re-lock them to the pre-shaped
-    # grasp pose so Phase A collision checking uses the actual hand shape the
-    # arm will carry during the approach.
+    # Keep locked hand joints open throughout Stage A.
     lock_joints = robot_cfg["robot_cfg"]["kinematics"].get("lock_joints")
     if isinstance(lock_joints, dict):
         for jn in lock_joints:
@@ -591,45 +817,73 @@ def _run_h2r_pipeline(args, mesh_name: str, pose_robot: np.ndarray,
         },
         "mesh": {
             "object": {
-                "file_path": _resolve_mesh_path(mesh_name, os.path.expanduser(args.mesh_root_dir)),
+                "file_path": _resolve_mesh_path(mesh_name, os.path.expanduser(args.mesh_root_dir), args.pose_mesh_frame),
                 "pose": [float(pose_robot[0, 3]), float(pose_robot[1, 3]), float(pose_robot[2, 3]),
                          float(obj_wxyz[0]), float(obj_wxyz[1]), float(obj_wxyz[2]), float(obj_wxyz[3])],
             }
         },
     }
 
-    # ---- 6. Phase A: HOME -> pregrasp via curobo MotionGen
-    cspace_jn = list(robot_cfg["robot_cfg"]["kinematics"]["cspace"]["joint_names"])
-    start_qpos_cspace = np.zeros(len(cspace_jn), dtype=np.float32)
-    for ci, jn in enumerate(cspace_jn):
+    # ---- 6. Phase A: deterministic HOME-height planar+rotate, then descend.
+    # CuRobo is used only to preview/validate the prescribed waypoints.  Real
+    # execution streams their FK poses through xArm's internal Cartesian IK.
+    active_jn = curobo_active_joint_names(robot_cfg)
+    start_qpos_cspace = np.zeros(len(active_jn), dtype=np.float32)
+    for ci, jn in enumerate(active_jn):
         if jn in name_to_full_idx:
             start_qpos_cspace[ci] = home_qpos_full[name_to_full_idx[jn]]
-    print("[pipe] Phase A: planning HOME -> wp0 (pregrasp)")
-    plan = _run_curobo_plan(
-        robot_cfg=robot_cfg,
-        world_cfg_dict=world_dict,
-        start_qpos=start_qpos_cspace,
-        target_eef_pose_robot=wrist_T_robot[0],
-        device=curobo_device,
-        seeds=int(args.curobo_seeds),
-        self_collision=True,
+    ee_link = str(robot_cfg["robot_cfg"]["kinematics"]["ee_link"])
+    home_eef_pose = robot_module.forward_kinematics(home_qpos_full)[ee_link]
+    stage_a_poses, stage_a_ends = staged_home_to_pregrasp(
+        home_eef_pose,
+        wrist_T_robot[0],
+        rate_hz=float(args.rate_hz),
+        planar_speed_mps=float(args.stage_a_linear_speed_mps),
+        angular_speed_rps=float(args.stage_a_angular_speed_rps),
+        raise_speed_mps=float(args.stage_a_raise_speed_mps),
+        descent_speed_mps=float(args.stage_a_descent_speed_mps),
+        min_hover_clearance_m=float(args.stage_a_hover_clearance_m),
+        table_normal=np.asarray([float(x) for x in args.table_normal_xyz.split(",")]),
     )
-    if not plan.get("success"):
-        print(f"[pipe] Phase A FAILED: {plan.get('status')} {plan.get('error')}")
-        return
-    approach_active = np.asarray(plan["trajectory"], dtype=np.float32)  # (Na, active_dof)
-    active_jn = list(plan.get("active_joint_names", []) or cspace_jn)
+    print(f"[pipe] Phase A staged waypoints: {stage_a_ends}")
+    approach_active, n_stage_a_success = _solve_ik_chain_curobo(
+        robot_cfg,
+        stage_a_poses,
+        start_qpos_cspace,
+        device=curobo_device,
+        num_seeds=int(args.ik_num_seeds),
+        null_space_weight=float(args.ik_null_space_weight),
+        position_threshold=float(args.ik_position_threshold),
+        rotation_threshold=float(args.ik_rotation_threshold),
+        sample_stride=int(args.viser_ik_stride),
+        world_cfg_dict=world_dict,
+    )
+    if n_stage_a_success != len(stage_a_poses):
+        print(f"[pipe] Phase A FAILED: {n_stage_a_success}/{len(stage_a_poses)} IK waypoints")
+        return None
+    approach_active = unwrap_xarm_joints(approach_active, active_jn)
     Na = int(approach_active.shape[0])
     print(f"[pipe] Phase A done: {Na} waypoints, active_dof={approach_active.shape[1]}")
 
     # ---- 7. Phase B: per-frame IK to follow wrist trajectory
     print(f"[pipe] Phase B: per-waypoint IK across {W} waypoints")
-    replay_active = _solve_ik_chain_curobo(
+    replay_active, n_replay_success = _solve_ik_chain_curobo(
         robot_cfg=robot_cfg,
         target_poses=wrist_T_robot,
         seed_arm_qpos=approach_active[-1],
         device=curobo_device,
+        num_seeds=int(args.ik_num_seeds),
+        null_space_weight=float(args.ik_null_space_weight),
+        position_threshold=float(args.ik_position_threshold),
+        rotation_threshold=float(args.ik_rotation_threshold),
+        sample_stride=int(args.viser_ik_stride),
     )
+    if n_replay_success != W:
+        print(f"[pipe] Phase B FAILED: {n_replay_success}/{W} IK waypoints")
+        return None
+    replay_active = unwrap_xarm_joints(
+        np.concatenate([approach_active[-1:], replay_active], axis=0), active_jn
+    )[1:]
 
     # ---- 8. expand active qpos to full URDF order; overlay hand qpos
     name_to_active_idx = {n: i for i, n in enumerate(active_jn)}
@@ -685,11 +939,7 @@ def _run_h2r_pipeline(args, mesh_name: str, pose_robot: np.ndarray,
         lift_target = wrist_T_robot[-1].copy()
         lift_target[2, 3] += lift_h
 
-        cspace_idx = {c: ci for ci, c in enumerate(cspace_jn)}
-        start_lift_cspace = start_qpos_cspace.copy()
-        for ai, jn in enumerate(active_jn):
-            if jn in cspace_idx:
-                start_lift_cspace[cspace_idx[jn]] = replay_active[-1, ai]
+        start_lift_cspace = replay_active[-1].copy()
 
         # Phase C is a short straight-up motion holding the object; we don't
         # want curobo to reject the start pose because the gripper is touching
@@ -727,11 +977,39 @@ def _run_h2r_pipeline(args, mesh_name: str, pose_robot: np.ndarray,
             print(f"[pipe] Phase C done: {Nc} waypoints")
         else:
             print(f"[pipe] Phase C FAILED: {lift_plan.get('status')} {lift_plan.get('error')}")
+            return None
 
     full_traj = np.concatenate([approach_full, bridge_full, replay_full, hold_full, lift_full], axis=0)
+    assert_arm_joint_limits(robot_module, full_traj)
+    approach_arm_poses = end_effector_poses_to_command_link(
+        robot_module,
+        stage_a_poses,
+        home_qpos_full,
+        end_effector_link=ee_link,
+    )
+    replay_arm_poses = end_effector_poses_to_command_link(
+        robot_module,
+        wrist_T_robot,
+        home_qpos_full,
+        end_effector_link=ee_link,
+    )
+    bridge_arm_poses = np.tile(approach_arm_poses[-1], (Nb, 1, 1))
+    hold_arm_poses = np.tile(replay_arm_poses[-1], (Nh, 1, 1))
+    lift_arm_poses = (
+        arm_link_pose_trajectory(robot_module, lift_full)
+        if Nc > 0 else np.zeros((0, 4, 4), dtype=np.float64)
+    )
+    arm_pose_traj = np.concatenate(
+        [approach_arm_poses, bridge_arm_poses, replay_arm_poses,
+         hold_arm_poses, lift_arm_poses],
+        axis=0,
+    )
+    if len(arm_pose_traj) != len(full_traj):
+        raise RuntimeError("Cartesian command and Viser preview lengths differ")
 
     # ---- 9. save artefacts next to other capture outputs
     np.save(os.path.join(abs_save_path, "h2r_pipeline_traj.npy"), full_traj)
+    np.save(os.path.join(abs_save_path, "h2r_pipeline_link6_poses.npy"), arm_pose_traj)
     with open(os.path.join(abs_save_path, "h2r_pipeline_meta.json"), "w") as f:
         json.dump({"n_approach": Na, "n_hand_interp": Nb, "n_replay": W,
                    "n_grasp_hold": Nh, "n_lift": Nc, "lift_height_m": lift_h,
@@ -753,7 +1031,8 @@ def _run_h2r_pipeline(args, mesh_name: str, pose_robot: np.ndarray,
     range_str = ", ".join(f"{n}[{lo}..{hi}]" for n, lo, hi in ranges)
     print(f"[pipe] planning done; trajectory shape={full_traj.shape}, "
           f"ranges {range_str}. (viser will open next)")
-    return {"full_traj": full_traj, "range_str": range_str,
+    return {"full_traj": full_traj, "arm_pose_traj": arm_pose_traj, "range_str": range_str,
+            "stage_a_ends": dict(stage_a_ends),
             "n_approach": Na, "n_hand_interp": Nb, "n_replay": W,
             "n_grasp_hold": Nh, "n_lift": Nc}
 
@@ -774,6 +1053,7 @@ def _replay_pregrasp(args, vis, mesh_name: str, pose_robot: np.ndarray) -> None:
     if not os.path.exists(res_path):
         raise FileNotFoundError(f"no packed result: {res_path}")
     d = np.load(res_path, allow_pickle=True)
+    pack_to_pose = _pack_frame_to_pose_frame(d, args.pose_mesh_frame)
     key = f"{args.src}_pregrasp_traj"
     if key not in d.files:
         raise KeyError(f"{key} missing in {res_path}")
@@ -826,7 +1106,7 @@ def _replay_pregrasp(args, vis, mesh_name: str, pose_robot: np.ndarray) -> None:
         if part6 is not None:
             from scipy.spatial import cKDTree
             mesh_path_ = _resolve_mesh_path(
-                mesh_name, os.path.expanduser(args.mesh_root_dir))
+                mesh_name, os.path.expanduser(args.mesh_root_dir), args.pose_mesh_frame)
             obj_mesh = _load_mesh(mesh_path_).copy()
             nn = cKDTree(ov).query(np.asarray(obj_mesh.vertices))[1]
             rgb_v = PART_RGB[np.clip(part6[nn], 0, 5)]
@@ -870,7 +1150,7 @@ def _replay_pregrasp(args, vis, mesh_name: str, pose_robot: np.ndarray) -> None:
         Wc = np.eye(4)
         Wc[:3, :3] = Rotation.from_euler("XYZ", w[3:6]).as_matrix()
         Wc[:3, 3] = w[:3]
-        Wr = pose_robot @ Wc
+        Wr = pose_robot @ pack_to_pose @ Wc
         if hasattr(hand_robot, "_visual_root_frame"):
             hand_robot._visual_root_frame.position = Wr[:3, 3]
             qx, qy, qz, qw = Rotation.from_matrix(Wr[:3, :3]).as_quat()
@@ -897,9 +1177,16 @@ def main() -> None:
     parser.add_argument("--rpc_addr", default="tcp://192.168.0.14:5570")
     parser.add_argument("--rpc_timeout_ms", type=int, default=300000)
     parser.add_argument("--rcc_entry", default="image_main.py")
-    parser.add_argument("--mesh_root_dir", default=os.path.join(shared_dir, "mesh_blender"))
+    parser.add_argument("--mesh_root_dir", default=os.path.join(shared_dir, "mesh_new"))
+    parser.add_argument("--pose_mesh_frame", default="original", choices=("original", "viser", "canonical"),
+                        help="object frame reported by the 6D pose RPC: \'original\' = raw <obj>.obj (FoundationPose, "
+                             "default); \'viser\' = <obj>_viser.obj. Packed wrists are converted with viser_align.")
     parser.add_argument("--c2r_path", default=None, help="optional C2R.npy override")
-    parser.add_argument("--robot_urdf", default=DEFAULT_ROBOT_URDF)
+    parser.add_argument("--hand_type", default="inspire_f1", choices=("inspire_f1", "inspire_dftp"),
+                        help="inspire_dftp switches the URDF/curobo defaults, the hand controller "
+                             "(get_hand('inspire_dftp')) and the rad->register mapping")
+    parser.add_argument("--robot_urdf", default=None,
+                        help=f"default: {DEFAULT_ROBOT_URDF} (F1) / {DFTP_ROBOT_URDF} (DFTP)")
     parser.add_argument("--no_vis", action="store_true")
     parser.add_argument("--viser_addr", default="tcp://localhost:5572",
                         help="ZMQ REQ address of a running viser_server. Push "
@@ -924,13 +1211,20 @@ def main() -> None:
                              "in the 3D scene; both; none")
     parser.add_argument(
         "--normalize", default="none", choices=pose_normalize.MODES,
-        help="per-object 6D pose normalization applied to the RC object pose "
-             "(same technique as the H2R grasp pipeline): none / x_roll "
-             "(cylindrical) / axis_sign (box) / sphere")
+        help=("generic pose normalization for objects without registered symmetry; "
+              "known mesh_new symmetries are handled automatically and take precedence"))
+    parser.add_argument(
+        "--no_object_symmetry_normalization",
+        dest="object_symmetry_normalization",
+        action="store_false",
+        help=("disable automatic capture_sil-style continuous-symmetry "
+              "canonicalization for objects registered in object_symmetry.py"),
+    )
+    parser.set_defaults(object_symmetry_normalization=True)
     # --- pre-grasp -> grasp motion replay (our H2R result) ---
     parser.add_argument("--scene", type=int, default=None,
-                        help="capture scene/clip number; enables pre-grasp "
-                             "motion replay for that clip's stored result")
+                        help="capture scene/clip number; with --pipeline, omission "
+                             "auto-selects the unique packed scene for this object")
     parser.add_argument("--src", default="robot", choices=("robot", "human"),
                         help="which contact source's grasp to replay")
     parser.add_argument("--particle", type=int, default=0,
@@ -946,16 +1240,34 @@ def main() -> None:
         help="inspire_f1 hand URDF (RH56F1_R) for the legacy motion replay")
     # --- new: full h2r pipeline (HOME -> pregrasp -> grasp replay) ---
     parser.add_argument("--pipeline", action="store_true",
-                        help="run the curobo h2r pipeline (HOME -> pregrasp via "
-                             "MotionGen, per-waypoint IK to follow the wrist "
+                        help="run the staged h2r pipeline (HOME-height planar+rotate, "
+                             "vertical descent, per-waypoint IK to preview the wrist "
                              "trajectory). Requires --scene. Trajectory is "
                              "added to the viewer for playback via add_traj.")
     parser.add_argument("--home_deg", nargs=6, type=float, default=HOME_DEG,
                         help="xarm home joint angles in degrees (6 values)")
-    parser.add_argument("--curobo_robot_cfg", default=DEFAULT_CUROBO_ROBOT_CFG,
+    parser.add_argument("--curobo_robot_cfg", default=None,
                         help="curobo robot config yaml (xarm_inspire_f1)")
     parser.add_argument("--curobo_device", default="cuda:1")
     parser.add_argument("--curobo_seeds", type=int, default=128)
+    parser.add_argument("--ik_num_seeds", type=int, default=32)
+    parser.add_argument("--ik_position_threshold", type=float, default=0.005)
+    parser.add_argument("--ik_rotation_threshold", type=float, default=0.05)
+    parser.add_argument("--ik_null_space_weight", type=float, default=1.0)
+    parser.add_argument("--viser_ik_stride", type=int, default=10,
+                        help="solve every Nth waypoint for the Viser-only IK preview; "
+                             "real xArm execution uses the dense Cartesian path")
+    parser.add_argument("--stage_a_linear_speed_mps", type=float, default=0.12)
+    parser.add_argument("--stage_a_angular_speed_rps", type=float, default=0.70)
+    parser.add_argument("--stage_a_raise_speed_mps", type=float, default=0.03,
+                        help="vertical HOME-to-hover speed")
+    parser.add_argument("--stage_a_descent_speed_mps", type=float, default=0.06)
+    parser.add_argument("--stage_a_hover_clearance_m", type=float, default=0.12)
+    parser.add_argument("--table_normal_xyz", default="0,0,1",
+                        help="table-normal direction in robot coordinates")
+    parser.add_argument("--symmetry_max_wrist_facing_deg", type=float, default=90.0,
+                        help="maximum XY angle between object->wrist and object->xArm "
+                             "when selecting a symmetry-equivalent grasp branch")
     parser.add_argument("--table_size_xyz", default="2.4,1.6,0.1")
     parser.add_argument("--table_pos_xyz", default="0.0,0.0,-0.05")
     parser.add_argument("--hand_interp_steps", type=int, default=60,
@@ -979,14 +1291,30 @@ def main() -> None:
                         help="post-grasp lift in robot +Z (meters). 0 disables "
                              "Phase C. Planned via curobo MotionGen with the "
                              "object removed from the collision world.")
+    parser.add_argument("--post_lift_hold_seconds", type=float, default=5.0,
+                        help="hold the lifted grasp before release")
+    parser.add_argument("--release_steps", type=int, default=30,
+                        help="fully open the hand over this many frames after "
+                             "the post-lift hold. 0 disables.")
     # --- real-robot execution after the viser session ---
     parser.add_argument("--rate_hz", type=float, default=30.0,
                         help="streaming rate to xarm + inspire_f1 (Hz)")
-    parser.add_argument("--replay_rate_hz", type=float, default=24.0,
+    parser.add_argument("--replay_rate_hz", type=float, default=15.0,
                         help="streaming rate for the pregrasp->grasp replay "
                              "segment only (Hz). Lower = slower close.")
     parser.add_argument("--home_tol_deg", type=float, default=2.0)
     parser.add_argument("--home_timeout", type=float, default=20.0)
+    parser.add_argument("--home_max_joint_speed_deg_s", type=float, default=10.0)
+    parser.add_argument("--return_home_max_joint_speed_deg_s", type=float, default=30.0,
+                        help="maximum xArm joint speed when returning HOME after release")
+    parser.add_argument("--home_preposition_hz", type=float, default=30.0)
+    parser.add_argument("--arm_servo_rate_hz", type=float, default=100.0,
+                        help="dense xArm joint-servo command rate during replay")
+    parser.add_argument("--max_planned_joint_speed_deg_s", type=float, default=30.0)
+    parser.add_argument("--max_cartesian_linear_speed_mps", type=float, default=0.10)
+    parser.add_argument("--max_cartesian_angular_speed_rps", type=float, default=0.50)
+    parser.add_argument("--max_measured_joint_speed_deg_s", type=float, default=60.0)
+    parser.add_argument("--live_joint_limit_margin_rad", type=float, default=0.03)
     parser.add_argument("--hand_side", default="right", choices=["right", "left"])
     parser.add_argument("--record_video", action="store_true", default=True,
                         help="record video via CaptureSession during execution")
@@ -997,9 +1325,24 @@ def main() -> None:
     parser.add_argument("--yes", action="store_true",
                         help="skip the post-viser execute confirmation prompt")
     args = parser.parse_args()
+    validate_motion_args(args)
+    args.result_root = os.path.expanduser(args.result_root)
+    if args.pipeline and args.scene is None:
+        args.scene = resolve_scene_arg(
+            args.result_root, args.mesh_name, "result.npz", args.scene
+        )
+        print(f"[pipe] auto-selected scene={args.scene}")
+    if args.robot_urdf is None:
+        args.robot_urdf = DFTP_ROBOT_URDF if args.hand_type == "inspire_dftp" else DEFAULT_ROBOT_URDF
+    if args.curobo_robot_cfg is None:
+        args.curobo_robot_cfg = (DFTP_CUROBO_ROBOT_CFG if args.hand_type == "inspire_dftp"
+                                 else DEFAULT_CUROBO_ROBOT_CFG)
+    if args.hand_type == "inspire_dftp" and float(args.grasp_squeeze) == 40.0:
+        # 40 raw counts of the F1 scale (0..1800) ~= 22 DFTP register units (0..1000)
+        args.grasp_squeeze = 22.0
 
     # mesh existence check (RPC server only needs mesh_name)
-    mesh_path = _resolve_mesh_path(args.mesh_name, os.path.expanduser(args.mesh_root_dir))
+    mesh_path = _resolve_mesh_path(args.mesh_name, os.path.expanduser(args.mesh_root_dir), args.pose_mesh_frame)
     if not os.path.exists(mesh_path):
         raise FileNotFoundError(f"mesh not found: {mesh_path}")
 
@@ -1049,33 +1392,85 @@ def main() -> None:
     c2r = _to_4x4(c2r)
     np.save(os.path.join(abs_save_path, "C2R.npy"), c2r)
 
-    pose_world = _to_4x4(np.asarray(pose_out["pose_world"], dtype=np.float32))
-
-    # optional per-object 6D pose normalization (same technique the H2R grasp
-    # pipeline applies). Selected by --normalize; rolls/canonicalizes the RC
-    # object pose so the object orientation is consistent across captures.
-    pose_world_raw = pose_world.copy()
-    if args.normalize != "none":
-        # T_align = identity: the RC 6D pose is estimated against <name>_viser.obj
-        # (the viser-aligned mesh), so it is ALREADY in the aligned frame -- no
-        # inv(T_align) here (build_scene_assets needs it only because its pose
-        # is in the ORIGINAL mesh frame).
-        pose_world = _to_4x4(pose_normalize.normalize_object_pose(
-            args.normalize, pose_world, c2r, np.eye(4)).astype(np.float32))
-        print(f"[normalize] mode={args.normalize} (T_align=identity; RC pose "
-              f"is already in the viser.obj frame)")
-
+    pose_world_raw = _to_4x4(np.asarray(pose_out["pose_world"], dtype=np.float32))
     r2c = np.linalg.inv(c2r)
-    pose_robot = r2c @ pose_world  # same convention as visualize_all.py / capture_rcc.py
+    pose_robot_raw = r2c @ pose_world_raw
+    pose_robot = pose_robot_raw.copy()
+    symmetry_info = None
+    normalization_applied = "none"
+    symmetry_wrist_object = None
+    if (
+        args.pipeline
+        and args.object_symmetry_normalization
+        and args.pose_mesh_frame == "original"
+        and pose_normalize.has_known_object_symmetry(args.mesh_name)
+    ):
+        symmetry_result_path = os.path.join(
+            args.result_root, args.mesh_name, str(args.scene), "result.npz"
+        )
+        with np.load(symmetry_result_path, allow_pickle=True) as symmetry_packed:
+            symmetry_pack_to_pose = pack_frame_to_pose_frame(
+                symmetry_packed, args.pose_mesh_frame
+            )
+        symmetry_wrist_object = pose_normalize.load_packed_pregrasp_wrist(
+            symmetry_result_path,
+            args.src,
+            args.particle,
+            symmetry_pack_to_pose,
+        )
+    if args.object_symmetry_normalization and args.pose_mesh_frame == "original":
+        pose_robot, symmetry_info = pose_normalize.normalize_known_object_symmetry(
+            args.mesh_name,
+            pose_robot_raw,
+            wrist_pose_object=symmetry_wrist_object,
+            table_normal_robot=np.asarray(
+                [float(x) for x in args.table_normal_xyz.split(",")]
+            ),
+            max_wrist_facing_angle_rad=np.deg2rad(
+                args.symmetry_max_wrist_facing_deg
+            ),
+        )
+    if symmetry_info is not None:
+        normalization_applied = symmetry_info["normalize_mode"]
+        if args.normalize != "none":
+            print(f"[normalize] ignoring generic mode={args.normalize} for "
+                  f"{args.mesh_name}; object-specific symmetry axis takes precedence")
+        if symmetry_info["symmetry_type"] == "continuous_axis":
+            print(f"[normalize] {args.mesh_name} continuous symmetry: "
+                  f"axis={np.round(symmetry_info['axis_object'], 6).tolist()}, "
+                  f"spin={np.rad2deg(symmetry_info['angle_rad']):+.1f} deg, "
+                  f"flipped={'yes' if symmetry_info['axis_flipped'] else 'no'}")
+        else:
+            print(f"[normalize] {args.mesh_name} cuboid symmetry: "
+                  f"variant={symmetry_info['variant_index']}/3")
+        if symmetry_wrist_object is not None:
+            print("[normalize] pregrasp wrist relative height: "
+                  f"{symmetry_info['wrist_relative_height_before_m']:+.3f} -> "
+                  f"{symmetry_info['wrist_relative_height_after_m']:+.3f} m "
+                  f"(robot-facing angle: "
+                  f"{np.rad2deg(symmetry_info['wrist_facing_angle_rad']):.1f} deg, "
+                  f"constraints={'ok' if symmetry_info['wrist_constraints_satisfied'] else 'miss'})")
+    elif args.normalize != "none":
+        pose_world_normalized = pose_normalize.normalize_object_pose(
+            args.normalize, pose_world_raw, c2r, np.eye(4)
+        )
+        pose_robot = r2c @ _to_4x4(pose_world_normalized)
+        normalization_applied = args.normalize
+        print(f"[normalize] mode={args.normalize}")
+    pose_robot = _to_4x4(pose_robot)
+    pose_world = _to_4x4(c2r @ pose_robot)
 
     robot_pose_json_path = os.path.join(abs_save_path, "object_6d_robot.json")
     robot_out = {
         "pose_robot": pose_robot.tolist(),
+        "pose_robot_raw": pose_robot_raw.tolist(),
         "R_robot": pose_robot[:3, :3].tolist(),
         "t_robot": pose_robot[:3, 3].tolist(),
         "pose_world": pose_world.tolist(),
         "pose_world_raw": pose_world_raw.tolist(),
-        "normalize_mode": args.normalize,
+        "normalize_mode_requested": args.normalize,
+        "normalize_mode": normalization_applied,
+        "object_symmetry": symmetry_info,
         "mesh_name": args.mesh_name,
         "mesh_path": mesh_path,
     }
@@ -1098,8 +1493,6 @@ def main() -> None:
     # returns the full trajectory; we hand it to add_traj after viser starts.
     pipeline_result = None
     if args.pipeline:
-        if args.scene is None:
-            raise ValueError("--pipeline requires --scene <int>")
         pipeline_result = _run_h2r_pipeline(
             args, args.mesh_name, pose_robot, robot_module, abs_save_path,
         )

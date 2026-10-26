@@ -1,0 +1,16 @@
+Local four-pair Cutie=cuda:0; stereo tensor batch=1 x4
+GPU placement: fast-foundation-trt=cuda:1, SAM3=cuda:1 (shared GPU)
+Keep the object stationary until Ready: initializing the four-pair reference...
+Latest calibration: /home/temp_id/shared_data/cam_param/20261002_130739
+Stereo backend: {'backend': 'fast-foundation-trt', 'fast_root': 'output/stereo_tracking/optimization_ab_20260922/assets/Fast-FoundationStereo', 'iters': 4, 'max_disp': 192, 'size': [672, 448], 'device': 1, 'engine_dir': 'output/stereo_tracking/fast_trt_ab_20260923/twostage_trt103', 'cuda_graph': False}
+Processing 1/4: 23180202/22645021
+Traceback (most recent call last):
+  File "/home/temp_id/paradex/src/capture/camera/stereo_pointcloud.py", line 233, in <module>
+    main()
+  File "/home/temp_id/paradex/src/capture/camera/stereo_pointcloud.py", line 198, in main
+    xyz, rgb, depth, valid = pair.reconstruct(disparity, left, args.max_depth)
+                             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/temp_id/paradex/paradex/vision/stereo_cloud.py", line 125, in reconstruct
+    xyz = cv2.reprojectImageTo3D(disparity, self.Q)
+          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+KeyboardInterrupt

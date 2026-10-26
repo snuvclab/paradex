@@ -1237,7 +1237,7 @@ def _execute_replay_if_confirmed(
         print("[plan] complete; no robot or hand motion commands were sent.")
         return False
     if immediate:
-        print("[execute] pedal PLAY; executing immediately without preview/confirmation.")
+        print("[execute] instant PLAY; executing without preview/confirmation.")
     elif getattr(args, "auto_execute", False):
         print("[execute] --auto-execute enabled; skipping PLAY confirmation.")
     else:
@@ -1459,9 +1459,9 @@ def _run_selected_replay_cycle(
     pedal_trigger: MiddlePedalPlayTrigger | None,
     session: Any | None,
 ) -> bool:
-    """Build and run one selection, using the low-latency pedal fast path."""
+    """Build and run one selection, using the low-latency PLAY fast path."""
 
-    immediate = selection.trigger == "pedal" and args.execute
+    immediate = args.execute and selection.trigger in {"pedal", "viser"}
     started = time.perf_counter()
     _, trajectory = _build_top_candidate_replay(
         args,

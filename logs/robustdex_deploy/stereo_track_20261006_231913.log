@@ -1,0 +1,11 @@
+Traceback (most recent call last):
+  File "/tmp/rdx_mock_tracker.py", line 5, in <module>
+    pub = CloudPublisher("tcp://127.0.0.1:5571")
+          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/temp_id/paradex/robustdex_deploy/cloud.py", line 31, in __init__
+    self.sock.bind(endpoint)
+  File "/home/temp_id/anaconda3/lib/python3.12/site-packages/zmq/sugar/socket.py", line 302, in bind
+    super().bind(addr)
+  File "zmq/backend/cython/socket.pyx", line 564, in zmq.backend.cython.socket.Socket.bind
+  File "zmq/backend/cython/checkrc.pxd", line 28, in zmq.backend.cython.checkrc._check_rc
+zmq.error.ZMQError: Address already in use (addr='tcp://127.0.0.1:5571')

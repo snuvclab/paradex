@@ -61,7 +61,7 @@ TACTILE_LAYOUT = {
 }
 
 class InspireControllerIP:
-    def __init__(self, ip, port, tactile=False, interface=None):
+    def __init__(self, ip, port, tactile=False, interface=None, force_limits=None):
         network_config = json.load(open(os.path.join(config_dir, "network.json"), "r"))
         # self.ip = network_config["inspire_ip"]["param"]["ip"]
         # self.port = network_config["inspire_ip"]["param"]["port"]
@@ -88,7 +88,13 @@ class InspireControllerIP:
         self.open_modbus()
         
         self.write6('speedSet', [1000, 1000, 1000, 1000, 1000, 1000])
-        self.write6('forceSet', [400, 400, 400, 400, 400, 400])
+        # FORCE_SET order: little, ring, middle, index, thumb bend, thumb rotate.
+        if force_limits is None:
+            force_limits = [400, 400, 400, 400, 400, 400]
+        force_limits = [int(value) for value in force_limits]
+        if len(force_limits) != 6 or not all(0 <= value <= 3000 for value in force_limits):
+            raise ValueError(f"force_limits must be six values in 0..3000, got {force_limits}")
+        self.write6('forceSet', force_limits)
         self.write6('angleSet', [1000, 1000, 1000, 1000, 1000, 1000])
         
         self.thread = Thread(target=self.move_hand)

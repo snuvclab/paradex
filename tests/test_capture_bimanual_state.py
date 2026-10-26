@@ -203,6 +203,107 @@ def make_events():
     return {"save": Event(), "stop": Event(), "exit": Event()}
 
 
+@pytest.mark.parametrize("missing_sides", [("left",), ("right",), ("left", "right")])
+@pytest.mark.parametrize("error_type", [TimeoutError, ConnectionRefusedError, ConnectionError])
+def test_capture_continues_without_unreachable_hands(
+    monkeypatch, tmp_path, caplog, missing_sides, error_type,
+):
+    calls = []
+    lifecycle = []
+
+    class ConnectedHand:
+        def __init__(self, side):
+            self.side = side
+
+        def start(self, path):
+            lifecycle.append((self.side, "start"))
+            assert path.endswith("hand_" + self.side)
+
+        def stop(self):
+            lifecycle.append((self.side, "stop"))
+
+        def end(self):
+            lifecycle.append((self.side, "end"))
+
+    def fake_get_hand(**kwargs):
+        side = kwargs["hand_side"]
+        calls.append(side)
+        if side in missing_sides:
+            raise error_type("unreachable")
+        return ConnectedHand(side)
+
+    monkeypatch.setattr(capture_module, "get_hand", fake_get_hand)
+    monkeypatch.setattr(capture_module, "shared_dir", str(tmp_path))
+    session = capture_module.CaptureSession(
+        hand="inspire_dftp", hand_side="bimanual", ip=True,
+        hand_kwargs={
+            "left": {"host": "192.168.11.210", "interface": "enp8s0f2"},
+            "right": {"host": "192.168.12.210", "interface": "enp8s0f1"},
+        },
+    )
+
+    assert calls == ["left", "right"]
+    for side in ("left", "right"):
+        assert (getattr(session, "hand_" + side) is None) == (side in missing_sides)
+    for side in missing_sides:
+        assert "Failed to connect " + side + " hand" in caplog.text
+        assert ("192.168.11.210" if side == "left" else "192.168.12.210") in caplog.text
+        assert ("enp8s0f2" if side == "left" else "enp8s0f1") in caplog.text
+    assert "Continuing capture with this hand disabled" in caplog.text
+
+    session.start("test")
+    session.stop()
+    session.end()
+    assert lifecycle == [
+        (side, operation)
+        for operation in ("start", "stop", "end")
+        for side in ("left", "right") if side not in missing_sides
+    ]
+
+
+def test_unimanual_capture_continues_after_connection_timeout(monkeypatch, caplog):
+    def fake_get_hand(**kwargs):
+        raise TimeoutError("timed out")
+
+    monkeypatch.setattr(capture_module, "get_hand", fake_get_hand)
+    session = capture_module.CaptureSession(hand="inspire_dftp", ip=True)
+
+    assert session.hand is None
+    assert "Failed to connect right hand" in caplog.text
+
+
+def test_capture_does_not_suppress_hand_configuration_errors(monkeypatch):
+    def fake_get_hand(**kwargs):
+        raise ValueError("invalid configuration")
+
+    monkeypatch.setattr(capture_module, "get_hand", fake_get_hand)
+    with pytest.raises(ValueError, match="invalid configuration"):
+        capture_module.CaptureSession(hand="inspire_dftp", ip=True)
+
+
+@pytest.mark.parametrize("missing_side", ["left", "right"])
+def test_bimanual_teleop_moves_connected_hand_when_other_hand_is_missing(
+    monkeypatch, missing_side,
+):
+    monkeypatch.setattr(capture_module.chime, "warning", lambda **_kwargs: None)
+    monkeypatch.setattr(capture_module.chime, "success", lambda **_kwargs: None)
+    session = make_session()
+    setattr(session, "hand_" + missing_side, None)
+    events = make_events()
+
+    def state_provider():
+        events["exit"].set()
+        return 0
+
+    assert session.teleop(
+        session_events=events,
+        state_policy="keyboard_control",
+        bimanual_state_provider=state_provider,
+    ) == "exit"
+    connected_side = "right" if missing_side == "left" else "left"
+    assert len(getattr(session, "hand_" + connected_side).moves) == 1
+
+
 def test_bimanual_state_zero_moves_both_arms_and_hands(monkeypatch):
     monkeypatch.setattr(capture_module.chime, "warning", lambda **_kwargs: None)
     monkeypatch.setattr(capture_module.chime, "success", lambda **_kwargs: None)
@@ -644,7 +745,7 @@ def test_inspire_maps_manus_angles_to_rh56_register_order():
 
     np.testing.assert_allclose(
         command,
-        [0.0, 1000.0, 500.0, 750.0, 250.0, 200.0],
+        [0.0, 1000.0, 500.0, 750.0, 350.0, 370.0],
     )
 
 
@@ -703,8 +804,8 @@ def test_bimanual_inspire_locks_thumb_four_when_both_thumb_five_are_high():
         }
     )
 
-    assert actions[2][5] == pytest.approx(800.0)
-    assert actions[3][5] == pytest.approx(800.0)
+    assert actions[2][5] == pytest.approx(1000.0)
+    assert actions[3][5] == pytest.approx(1000.0)
     assert actions[2][4] == pytest.approx(1000.0)
     assert actions[3][4] == pytest.approx(1000.0)
 
@@ -735,7 +836,7 @@ def test_bimanual_inspire_locks_thumb_four_independently_per_hand():
         }
     )
 
-    assert actions[2][5] == pytest.approx(800.0)
+    assert actions[2][5] == pytest.approx(1000.0)
     assert actions[3][5] == pytest.approx(0.0)
     assert actions[2][4] == pytest.approx(1000.0)
     assert actions[3][4] == pytest.approx(0.0)

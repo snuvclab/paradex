@@ -1,0 +1,17 @@
+Traceback (most recent call last):
+  File "/home/temp_id/paradex/src/capture/camera/stereo_track.py", line 1335, in <module>
+    main()
+  File "/home/temp_id/paradex/src/capture/camera/stereo_track.py", line 1319, in main
+    import torch
+  File "/home/temp_id/anaconda3/lib/python3.12/site-packages/torch/__init__.py", line 430, in <module>
+    _load_global_deps()
+  File "/home/temp_id/anaconda3/lib/python3.12/site-packages/torch/__init__.py", line 381, in _load_global_deps
+    _preload_cuda_deps()
+  File "/home/temp_id/anaconda3/lib/python3.12/site-packages/torch/__init__.py", line 348, in _preload_cuda_deps
+    _preload_cuda_lib(lib_folder, lib_name)
+  File "/home/temp_id/anaconda3/lib/python3.12/site-packages/torch/__init__.py", line 318, in _preload_cuda_lib
+    ctypes.CDLL(lib_path)
+  File "/home/temp_id/anaconda3/lib/python3.12/ctypes/__init__.py", line 379, in __init__
+    self._handle = _dlopen(self._name, mode)
+                   ^^^^^^^^^^^^^^^^^^^^^^^^^
+KeyboardInterrupt

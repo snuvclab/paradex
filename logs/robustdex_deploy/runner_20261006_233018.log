@@ -1,0 +1,3 @@
+RUNNER: started (hang=False)
+RUNNER: SIGINT -> hold robot, close controllers
+RUNNER: closed

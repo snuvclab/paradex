@@ -28,6 +28,8 @@ class ViserViewer():
         up_direction=np.array([0, 0, 1]),
         scene_title=None,
         show_player=True,
+        server_host="0.0.0.0",
+        server_port=8080,
     ):
         self.frame_nodes: dict[str, viser.FrameHandle] = {}
 
@@ -40,6 +42,8 @@ class ViserViewer():
 
         self.traj_list = []
         self.num_frames = 0
+        self.server_host = str(server_host)
+        self.server_port = int(server_port)
 
         self.load_server()
         self.add_lights()
@@ -50,7 +54,10 @@ class ViserViewer():
         self.scene_title = scene_title
 
     def load_server(self):
-        self.server = viser.ViserServer()
+        self.server = viser.ViserServer(
+            host=self.server_host,
+            port=self.server_port,
+        )
         self.server.gui.configure_theme(dark_mode=True)
 
         self.server.scene.set_up_direction(self.up_direction)
@@ -183,7 +190,14 @@ class ViserViewer():
 
         self.robot_dict[name] = robot
 
-    def add_object(self, name, obj: trimesh.Trimesh, obj_T, opacity: float = 1.0):
+    def add_object(
+        self,
+        name,
+        obj: trimesh.Trimesh,
+        obj_T,
+        opacity: float = 1.0,
+        max_mesh_faces: Optional[int] = None,
+    ):
         """
         Add an object mesh to the scene
 
@@ -192,7 +206,15 @@ class ViserViewer():
             obj: trimesh.Trimesh object
             obj_T: 4x4 transformation matrix for the object pose
             opacity: Object opacity [0,1]. Uses simple mesh path when < 1.
+            max_mesh_faces: Optional triangle budget for viewer rendering.
         """
+        if max_mesh_faces is not None and len(obj.faces) > max_mesh_faces:
+            try:
+                obj = obj.simplify_quadric_decimation(face_count=max_mesh_faces)
+                print(f"[viser] simplified object '{name}' to {len(obj.faces)} faces")
+            except Exception as exc:
+                print(f"[viser] could not simplify object '{name}': {exc}")
+
         # Create a frame for the object
 
         frame_handle = self.server.scene.add_frame(
@@ -237,16 +259,34 @@ class ViserViewer():
 
         self.frame_nodes[name] = frame_handle
 
-    def add_traj(self, name, robot_traj: Dict, obj_traj: Dict = {}):
+    def add_traj(
+        self,
+        name,
+        robot_traj: Dict,
+        obj_traj: Optional[Dict] = None,
+        robot_pose_traj: Optional[Dict] = None,
+    ):
         if len(robot_traj) == 0:
             return
+        obj_traj = {} if obj_traj is None else obj_traj
+        robot_pose_traj = {} if robot_pose_traj is None else robot_pose_traj
         traj_len = robot_traj[list(robot_traj.keys())[0]].shape[0]
-        new_traj_dict = {"robot":{}, "object":{}}
+        new_traj_dict = {"robot": {}, "robot_pose": {}, "object": {}}
         for robot_name in list(self.robot_dict.keys()):
             if robot_name in robot_traj:
                 new_traj_dict["robot"][robot_name] = robot_traj[robot_name]
             else:
-                new_traj_dict["robot"][robot_name] = np.tile(self.robot_dict[robot_name].urdf.get_cfg(), (traj_len, 1))
+                new_traj_dict["robot"][robot_name] = np.tile(
+                    self.robot_dict[robot_name].get_cfg(), (traj_len, 1)
+                )
+            if robot_name in robot_pose_traj:
+                poses = np.asarray(robot_pose_traj[robot_name], dtype=np.float64)
+                if poses.shape != (traj_len, 4, 4):
+                    raise ValueError(
+                        f"robot pose trajectory '{robot_name}' must have shape "
+                        f"({traj_len},4,4), got {poses.shape}"
+                    )
+                new_traj_dict["robot_pose"][robot_name] = poses
 
         for obj_name in list(self.obj_dict.keys()):
             if obj_name in obj_traj:
@@ -319,6 +359,14 @@ class ViserViewer():
             for robot_name, robot in self.robot_dict.items():
                 if robot_name in current_traj["robot"]:
                     robot.update_cfg(current_traj["robot"][robot_name][local_timestep])
+                if robot_name in current_traj.get("robot_pose", {}):
+                    robot_pose = current_traj["robot_pose"][robot_name][local_timestep]
+                    xyzw = R.from_matrix(robot_pose[:3, :3]).as_quat()
+                    for attr in ("_visual_root_frame", "_collision_root_frame"):
+                        root = getattr(robot, attr, None)
+                        if root is not None:
+                            root.wxyz = xyzw[[3, 0, 1, 2]]
+                            root.position = robot_pose[:3, 3]
 
             for obj_name, obj in self.obj_dict.items():
                 if obj_name in current_traj["object"]:
@@ -366,7 +414,7 @@ class ViserViewer():
             self.gui_resume = self.server.gui.add_button("Resume", disabled=True)
             self.render_png = self.server.gui.add_checkbox("Render to PNG", False)
             self.gui_framerate = self.server.gui.add_slider(
-                "FPS", min=1, max=120, step=0.1, initial_value=10
+                "FPS", min=1, max=120, step=0.1, initial_value=120
             )
             gui_framerate_options = self.server.gui.add_button_group(
                 "FPS options", ("10", "20", "30", "60", "120")
@@ -885,6 +933,7 @@ class ViserRobotModule():
                     self._urdf.collision_scene, root_node_name, collision_geometry=True
                 )
         self._joint_map_values = [*self._urdf.joint_map.values()] * num_joints_to_repeat
+        self._current_cfg = np.zeros(self._urdf.get_num_joints(), dtype=float)
         self.update_cfg(np.zeros(self._urdf.get_num_joints(), dtype=float))
 
     def change_color(self, name_list, color: Tuple[float, float, float]) -> None:
@@ -942,6 +991,17 @@ class ViserRobotModule():
                
     def update_cfg(self, configuration: np.ndarray) -> None:
         """Update the joint angles of the visualized URDF."""
+        if isinstance(configuration, dict):
+            indices = {
+                name: index for index, name in enumerate(self._urdf.get_joint_names())
+            }
+            for name, value in configuration.items():
+                if name in indices:
+                    self._current_cfg[indices[name]] = float(value)
+        else:
+            values = np.asarray(configuration, dtype=float).reshape(-1)
+            if values.shape == self._current_cfg.shape:
+                self._current_cfg = values.copy()
         self._urdf.update_cfg(configuration)
         for joint, frame_handle in zip(self._joint_map_values, self._joint_frames):
             assert isinstance(joint, yourdfpy.Joint)
@@ -952,6 +1012,10 @@ class ViserRobotModule():
             xyzw = R.from_matrix(T_parent_child[:3, :3].copy()).as_quat()
             frame_handle.wxyz = xyzw[[3, 0, 1, 2]]
             frame_handle.position = T_parent_child.copy()[:3, 3] * self._scale
+
+    def get_cfg(self) -> np.ndarray:
+        """Return the last joint configuration applied to this Viser robot."""
+        return self._current_cfg.copy()
             
     def _add_joint_frames_and_meshes(
         self, scene: Scene, root_node_name: str, collision_geometry: bool

@@ -1,0 +1,24 @@
+[runner] keyboard listener not ready (no X display?); use Ctrl-C to abort
+[runner] connecting to the robot / object cloud ...
+[backend] waiting for the object cloud on tcp://127.0.0.1:5571 ...
+[backend] cloud ok; creating the xArm controller (ROS2 services /right/xarm/*, servo_api=angle_j) ...
+[WARN] [1791301245.579080272] [rcl.logging_rosout]: Publisher already registered for provided node name. If this is due to multiple nodes with the same name then all logs for that logger name will go out over the existing publisher. As soon as any node with that name is destructed it will unregister the publisher, preventing any further logs for that name from being published on the rosout topic.
+[backend] xArm ok; creating the Allegro controller (/right/allegroHand_0/*) ...
+[runner] connected: q = [0.21, -0.089, -0.791, 2.795, 0.431, 1.94, 0.2, 0.541, 0.192, 0.502, 0.189, 0.687, 0.048, 0.485, 0.187, 0.633, 0.198, 0.493, 1.353, 0.02, 0.063, 0.243]
+[ep 0] object cloud: 4096 pts, z 1%/50%/99% = 0.014 / 0.040 / 0.078 m -> table top estimate 0.009 (sim 0.018, offset -0.009); using table z = 0.009 (auto from cloud)
+[ep 0] pre-grasp {'feasible': 10, 'width': 0.075, 'centre': [0.5805216089062307, -0.046002116457735796, 0.05104178083182751], 'palm_pos': [0.5804336284932701, -0.03233939028203462, 0.3006681459715994], 'rot_index': 2, 'source': 'deploy'}
+move to pre-grasp (arm [ 0.053 -0.083 -0.726  3.642  0.847  1.162])  [Enter to continue / q to abort] [ep 0] pre-grasp reached: arm max err 0.004 rad (joint 4), hand max err 0.149 rad (joint 6)
+start policy (70 steps, scale 0.50)  [Enter to continue / q to abort] [ep 0] step 0  contact 0000000000000  min_dist 0.106  |a| 2.17  dtau_max 0.0 Nm  hand|tau| mean 0.04 max 0.23 Nm  (compute 294 ms)
+[runner] overrun 96 ms (points 252 obs 14 policy 12 publish 13 log 3 ms)
+[ep 0] step 6  contact 0000000000000  min_dist 0.098  |a| 2.18  dtau_max 12.0 Nm  hand|tau| mean 0.04 max 0.25 Nm  PRESS-LIMITED  (compute 45 ms)
+[ep 0] step 10  contact 0000000000000  min_dist 0.086  |a| 2.14  dtau_max 7.5 Nm  hand|tau| mean 0.06 max 0.23 Nm  (compute 31 ms)
+[runner] overrun 50 ms (points 193 obs 12 policy 42 publish 4 log 0 ms)
+[runner] overrun 75 ms (points 174 obs 1 policy 30 publish 17 log 3 ms)
+[ep 0] step 18  contact 0000000000000  min_dist 0.072  |a| 1.97  dtau_max 12.0 Nm  hand|tau| mean 0.07 max 0.31 Nm  PRESS-LIMITED  (compute 260 ms)
+[runner] overrun 63 ms (points 215 obs 5 policy 26 publish 12 log 2 ms)
+[ep 0] step 20  contact 0000000000000  min_dist 0.067  |a| 1.90  dtau_max 8.0 Nm  hand|tau| mean 0.07 max 0.31 Nm  (compute 48 ms)
+[ep 0] step 30  contact 0000000000000  min_dist 0.058  |a| 1.61  dtau_max 10.6 Nm  hand|tau| mean 0.08 max 0.37 Nm  (compute 51 ms)
+[ep 0] step 40  contact 0000000000000  min_dist 0.057  |a| 1.64  dtau_max 7.4 Nm  hand|tau| mean 0.08 max 0.38 Nm  (compute 112 ms)
+[ep 0] step 43  contact 0000000000000  min_dist 0.052  |a| 1.79  dtau_max 13.3 Nm  hand|tau| mean 0.08 max 0.38 Nm  PRESS-LIMITED  (compute 45 ms)
+[ep 0] step 50  contact 0000000000000  min_dist 0.043  |a| 1.65  dtau_max 12.4 Nm  hand|tau| mean 0.09 max 0.40 Nm  PRESS-LIMITED  (compute 28 ms)
+[runner] ABORT: frame below table: z=-0.013

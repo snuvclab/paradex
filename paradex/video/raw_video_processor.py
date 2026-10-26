@@ -10,6 +10,7 @@ from paradex.image.undistort import precomute_undistort_map, apply_undistort_map
 from paradex.calibration.utils import load_camparam
 from paradex.utils.upload_file import rsync_copy
 
+
 def update_progress(progress_dict, video_id, updates):
     """Manager.dict 안전하게 업데이트"""
     temp = dict(progress_dict.get(video_id, {}))
@@ -30,11 +31,8 @@ def undistort_raw_video(video_path, progress_dict, video_id):
         root_name = root_name[1:]
     
     out_path = os.path.join(root_dir, "videos", f"{serial_num}.avi")
-    os.makedirs(os.path.dirname(out_path), exist_ok=True)
     
     nas_path = os.path.join(shared_dir, root_name, "videos", f"{serial_num}.avi")
-    os.makedirs(os.path.dirname(nas_path), exist_ok=True)
-    
     # 초기 상태 업데이트
     progress_dict[video_id] = {
         'status': 'starting',
@@ -44,6 +42,16 @@ def undistort_raw_video(video_path, progress_dict, video_id):
         'progress': 0.0,
         'message': 'Initializing...'
     }
+
+    try:
+        os.makedirs(os.path.dirname(out_path), exist_ok=True)
+        os.makedirs(os.path.dirname(nas_path), exist_ok=True)
+    except OSError as exc:
+        update_progress(progress_dict, video_id, {
+            'status': 'failed',
+            'message': f'Cannot create output directory: {exc}'
+        })
+        return f"{video_path}: cannot create output directory: {exc}"
     
     cap = cv2.VideoCapture(video_path)
     num_frame = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
@@ -65,7 +73,12 @@ def undistort_raw_video(video_path, progress_dict, video_id):
                 'status': 'uploading',
                 'message': 'Already processed. Uploading to NAS...'
             })
-            rsync_copy(out_path, nas_path)
+            if not rsync_copy(out_path, nas_path):
+                update_progress(progress_dict, video_id, {
+                    'status': 'failed',
+                    'message': 'Upload to NAS failed; source files retained.'
+                })
+                return f"{video_path}: upload failed"
             os.remove(out_path)
             os.remove(video_path)
             update_progress(progress_dict, video_id, {
@@ -147,7 +160,12 @@ def undistort_raw_video(video_path, progress_dict, video_id):
         'message': 'Uploading to NAS...'
     })
     
-    rsync_copy(out_path, nas_path)
+    if not rsync_copy(out_path, nas_path):
+        update_progress(progress_dict, video_id, {
+            'status': 'failed',
+            'message': 'Upload to NAS failed; source files retained.'
+        })
+        return f"{video_path}: upload failed"
 
     update_progress(progress_dict, video_id, {
         'status': 'completed',

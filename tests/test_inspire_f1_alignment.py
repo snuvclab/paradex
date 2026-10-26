@@ -31,6 +31,8 @@ from paradex.retargetor.inspire_f1_alignment import (
 )
 from paradex.io.teleop.vive.receiver import ViveManusROSReceiver
 from paradex.retargetor.hand_regargetor import (
+    _ALLEGRO_V5_PHYSICAL_LOWER,
+    _ALLEGRO_V5_PHYSICAL_UPPER,
     _align_allegro_v5_action,
     _align_wuji_direct_action,
     _cluster_balanced_distance_gated_target,
@@ -472,7 +474,7 @@ def test_allegro_v5_raw_uses_full_manus_joint_angles_for_vive():
             (1.0 - np.clip(42.0 / (53.6 - (-13.0)), 0.0, 1.0))
             * 0.8
             * 1.78,
-            -1.65 * np.deg2rad(31.0) - 1.57,
+            31.0 / 75.0 * 1.78,
             1.65 * 1.2 * np.sin(np.deg2rad(30.0)),
             1.65 * 1.2 * np.sin(np.deg2rad(60.0)),
         ]
@@ -498,6 +500,35 @@ def test_allegro_v5_raw_uses_full_manus_joint_angles_for_vive():
     saturated = dict(ergonomics, ThumbPIPStretch=90.0, ThumbDIPStretch=90.0)
     saturated_action = _allegro_v5_raw_from_manus_ergonomics(saturated)
     np.testing.assert_allclose(saturated_action[14:16], [1.9, 1.8])
+
+    open_thumb = _allegro_v5_raw_from_manus_ergonomics(
+        dict(ergonomics, ThumbMCPSpread=0.0)
+    )
+    opposed_thumb = _allegro_v5_raw_from_manus_ergonomics(
+        dict(ergonomics, ThumbMCPSpread=75.0)
+    )
+    np.testing.assert_allclose(open_thumb[13], 0.0)
+    np.testing.assert_allclose(opposed_thumb[13], 1.78)
+    assert open_thumb[13] < opposed_thumb[13]
+
+    extreme_ring = _allegro_v5_raw_from_manus_ergonomics(
+        dict(
+            ergonomics,
+            RingSpread=180.0,
+            RingMCPStretch=-180.0,
+            RingPIPStretch=360.0,
+            RingDIPStretch=360.0,
+        )
+    )
+    np.testing.assert_allclose(
+        extreme_ring[8:12],
+        [
+            _ALLEGRO_V5_PHYSICAL_UPPER[8],
+            _ALLEGRO_V5_PHYSICAL_LOWER[9],
+            _ALLEGRO_V5_PHYSICAL_UPPER[10],
+            _ALLEGRO_V5_PHYSICAL_UPPER[11],
+        ],
+    )
 
 
 def test_allegro_v5_uses_ergonomics_for_vive_reparenting_invariant_tie_breaker():
@@ -551,14 +582,18 @@ def test_allegro_v5_uses_ergonomics_for_vive_reparenting_invariant_tie_breaker()
 
     positive_branch = make_frame(0.6)
     negative_branch = make_frame(-0.6)
-    assert abs(_allegro_v5_raw(positive_branch)[1] - _allegro_v5_raw(negative_branch)[1]) > 0.8
+    assert abs(_allegro_v5_raw(positive_branch)[1] - _allegro_v5_raw(negative_branch)[1]) > 0.5
     np.testing.assert_allclose(
         allegro_v5(positive_branch, ergonomics=ergonomics),
         allegro_v5(negative_branch, ergonomics=ergonomics),
         atol=1e-12,
     )
+    np.testing.assert_allclose(
+        allegro_v5(positive_branch, ergonomics=ergonomics),
+        _allegro_v5_raw({}, ergonomics=ergonomics),
+    )
     # Missing MANUS angles retain the transform-only compatibility path.
-    assert allegro_v5(positive_branch, ergonomics={}).shape == (16,)
+    assert allegro_v5(positive_branch).shape == (16,)
 
 
 def test_allegro_v5_raw_rejects_partial_manus_ergonomics():

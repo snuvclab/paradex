@@ -1,5 +1,6 @@
 import importlib.util
 import json
+from argparse import Namespace
 from pathlib import Path
 import sys
 import numpy as np
@@ -520,6 +521,25 @@ def test_episode_source_pose_prefers_v2_over_v1_when_both_are_available(tmp_path
     np.savez(tmp_path / "object_6d_pose_v2.npz", frame_0=np.eye(4))
 
     assert replay._episode_source_pose_path(tmp_path, None) == tmp_path / "object_6d_pose_v2.npz"
+
+
+def test_load_episode_root_accepts_inspire_dftp_raw_commands(tmp_path):
+    arm_dir = tmp_path / "raw" / "arm"
+    hand_dir = tmp_path / "raw" / "hand"
+    arm_dir.mkdir(parents=True)
+    hand_dir.mkdir(parents=True)
+    arm = np.repeat(np.eye(4, dtype=object)[None], 2, axis=0)
+    np.save(arm_dir / "action.npy", arm)
+    np.save(arm_dir / "time.npy", np.array([0.0, 0.1]))
+    np.save(hand_dir / "action.npy", np.array([[900] * 6, [800] * 6]))
+    np.save(hand_dir / "time.npy", np.array([0.0, 0.1]))
+    np.savez(tmp_path / "object_6d_pose_v2.npz", frame_0=np.eye(4))
+    np.save(tmp_path / "C2R.npy", np.eye(4))
+
+    episode = replay._load_episode_root(Namespace(robot="inspire_dftp"), tmp_path)
+
+    assert episode.hand_commands.shape == (2, 6)
+    np.testing.assert_allclose(episode.hand_commands[0], 900)
 
 
 def test_viser_object_pose_uses_inverse_of_viser_mesh_alignment(tmp_path):

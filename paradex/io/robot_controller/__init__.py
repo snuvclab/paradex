@@ -21,9 +21,11 @@ def get_hand(
     tactile=False,
     ip=False,
     hand_side="right",
+    namespace=None,
     interface=None,
     host=None,
     command_enabled=True,
+    force_limits=None,
 ):
     if hand_name in ("inspire", "inspire_dftp"):
         if ip:
@@ -35,6 +37,7 @@ def get_hand(
                 **params,
                 tactile=tactile,
                 interface=interface,
+                force_limits=force_limits,
             )
         else:
             from .inspire_controller import InspireController
@@ -60,6 +63,7 @@ def get_hand(
         from .allegro_v5_controller_ros2 import AllegroController
         return AllegroController(
             hand_side=hand_side,
+            namespace=namespace,
             tactile=tactile,
             command_enabled=command_enabled,
         )

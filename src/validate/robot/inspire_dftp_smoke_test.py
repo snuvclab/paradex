@@ -146,12 +146,12 @@ def parse_args() -> argparse.Namespace:
         )
     )
     parser.add_argument("--port", type=int, default=6000)
-    parser.add_argument("--left-ip", default="192.168.11.211")
-    parser.add_argument("--right-ip", default="192.168.11.210")
+    parser.add_argument("--left-ip", default="192.168.11.210")
+    parser.add_argument("--right-ip", default="192.168.12.210")
     parser.add_argument(
         "--left-interface",
-        default="enp8s0f2",
-        help="NIC connected to the left hand (default: enp8s0f2)",
+        default="enp8s0f3",
+        help="NIC connected to the left hand (default: enp8s0f3)",
     )
     parser.add_argument(
         "--right-interface",

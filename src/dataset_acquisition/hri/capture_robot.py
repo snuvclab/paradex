@@ -27,6 +27,10 @@ parser = argparse.ArgumentParser()
 
 parser.add_argument('--device', choices=['xsens', 'occulus', 'vive'], default="vive")
 parser.add_argument('--hand-side', choices=['right', 'left', 'bimanual'], default="right")
+parser.add_argument(
+    '--pedal', action='store_true',
+    help='Use the middle Stream Deck pedal for unimanual arm/hand teleop: hold=enable, release=pause. Bimanual always uses the pedal.',
+)
 vive_group = parser.add_mutually_exclusive_group()
 vive_group.add_argument(
     '--use-vive', dest='use_vive', action='store_true',
@@ -77,8 +81,12 @@ parser.set_defaults(timestamp=True)
 parser.add_argument('--arm', type=str, default="xarm",
                     help="Arm controller name. Use 'none' (or empty) to disable arm control.")
 parser.add_argument('--hand', type=str, default="allegro_v5",
-                    help="Hand controller/retargetor name. Use 'none' for arm-only teleop; 'allegro_v5' for the direct-anchor retargeter; 'wuji' for optimization, 'wuji_direct' for direct mapping, or 'wuji_hybrid' for opt thumb + direct fingers.")
-parser.add_argument('--capture_root', type=str, default="eccv2026/allegro_v5")
+                    help="Hand controller/retargetor name. Use 'none' for arm-only teleop; 'allegro_v5' with --allegro-retarget direct|dexpilot; 'wuji' for optimization, 'wuji_direct' for direct mapping, or 'wuji_hybrid' for opt thumb + direct fingers.")
+parser.add_argument(
+    '--allegro-retarget', choices=['direct', 'dexpilot'], default='direct',
+    help='Allegro V5: direct MANUS angles (default), or DexPilot fingertip optimization (right hand).',
+)
+parser.add_argument('--capture_root', type=str, default="2026_miyungpa_retry")
 parser.add_argument('--name', type=str, required=True)
 parser.add_argument('--tactile', action="store_true")
 parser.add_argument('--ip', action="store_true")
@@ -111,18 +119,61 @@ parser.add_argument(
 )
 parser.add_argument(
     '--inspire-right-ip',
-    default='192.168.11.211',
+    default='192.168.12.210',
     help='IP address for the right Inspire Modbus TCP hand.',
 )
 parser.add_argument(
     '--inspire-left-interface',
-    default='enp8s0f2',
+    default='enp8s0f3',
     help='Network interface for the left Inspire Modbus TCP hand.',
 )
 parser.add_argument(
     '--inspire-left-ip',
     default='192.168.11.210',
     help='IP address for the left Inspire Modbus TCP hand.',
+)
+def _inspire_force_limits(text):
+    values = [int(value) for value in text.split(',')]
+    if len(values) != 6 or not all(0 <= value <= 3000 for value in values):
+        raise argparse.ArgumentTypeError('expected six comma-separated values in 0..3000')
+    return values
+
+
+parser.add_argument(
+    '--inspire-left-force-limits',
+    type=_inspire_force_limits,
+    default=[400, 400, 400, 400, 400, 400],
+    help='Left Inspire FORCE_SET (little,ring,middle,index,thumb_bend,thumb_rotate).',
+)
+parser.add_argument(
+    '--inspire-right-force-limits',
+    type=_inspire_force_limits,
+    # The right hand's thumb bend is mechanically stiffer and stalls near
+    # ANGLE 245 at 400; 600 reaches the end of travel.
+    default=[400, 400, 400, 400, 600, 400],
+    help='Right Inspire FORCE_SET (little,ring,middle,index,thumb_bend,thumb_rotate).',
+)
+parser.add_argument(
+    '--inspire-retarget',
+    choices=['manus', 'dexpilot'],
+    default='manus',
+    help=(
+        "Inspire finger retargeting: 'manus' maps MANUS ergonomics angles "
+        "(with the thumb lock); 'dexpilot' runs AnyTeleop-style fingertip "
+        "vector optimization with a glove thumb-IP bend blend."
+    ),
+)
+parser.add_argument(
+    '--inspire-thumb-bend-weight',
+    type=float,
+    default=0.7,
+    help='DexPilot thumb bend blend: 0=original DexPilot, 1=glove IP bend (default: 0.7).',
+)
+parser.add_argument(
+    '--inspire-thumb-full-bend-deg',
+    type=float,
+    default=60.0,
+    help='Glove thumb IP angle mapped to fully closed in DexPilot mode (default: 60 deg).',
 )
 parser.add_argument(
     '--visualize-tactile-realtime',
@@ -152,9 +203,14 @@ parser.add_argument(
     default=1.15
 
     ,
-    help="Uniform keypoint scale around the wrist for Wuji. Use 1.5 if the robot hand is about 1.5x larger.",
+    help="Keypoint scale for Allegro/Inspire DexPilot and Wuji. Default: 1.15.",
 )
 args = parser.parse_args()
+if args.inspire_retarget == 'dexpilot':
+    if not np.isfinite(args.inspire_thumb_bend_weight) or not 0 <= args.inspire_thumb_bend_weight <= 1:
+        parser.error('--inspire-thumb-bend-weight must be finite and in [0, 1]')
+    if not np.isfinite(args.inspire_thumb_full_bend_deg) or not 0 < args.inspire_thumb_full_bend_deg <= 180:
+        parser.error('--inspire-thumb-full-bend-deg must be finite and in (0, 180]')
 
 
 def _normalize_optional_name(name):
@@ -165,6 +221,10 @@ def _normalize_optional_name(name):
 
 args.arm = _normalize_optional_name(args.arm)
 args.hand = _normalize_optional_name(args.hand)
+if args.allegro_retarget == 'dexpilot' and (
+    args.hand != 'allegro_v5' or args.hand_side != 'right'
+):
+    parser.error('--allegro-retarget dexpilot requires --hand allegro_v5 --hand-side right.')
 if args.allegro_command_rate_hz <= 0.0:
     parser.error('--allegro-command-rate-hz must be positive.')
 if args.camera_preview_port <= 0:
@@ -218,7 +278,8 @@ listen_keyboard(
 print("Keyboard control: c=start capture, s=stop capture, q=exit, y=grasp success, n=grasp fail")
 print("In keyboard_control mode, gesture states 2/3 do not control session start/stop/exit.")
 
-pedal_state = MiddlePedalState() if args.hand_side == "bimanual" else None
+unimanual_pedal = args.pedal and args.hand_side != "bimanual"
+pedal_state = MiddlePedalState() if args.pedal or args.hand_side == "bimanual" else None
 if pedal_state is not None:
     atexit.register(pedal_state.close)
 
@@ -232,16 +293,20 @@ if inspire_bimanual:
         "right": {
             "interface": args.inspire_right_interface,
             "host": args.inspire_right_ip,
+            "force_limits": args.inspire_right_force_limits,
         },
         "left": {
             "interface": args.inspire_left_interface,
             "host": args.inspire_left_ip,
+            "force_limits": args.inspire_left_force_limits,
         },
     }
     print(
         "Bimanual Inspire Modbus TCP: "
-        f"right={args.inspire_right_ip} via {args.inspire_right_interface}, "
-        f"left={args.inspire_left_ip} via {args.inspire_left_interface}"
+        f"right={args.inspire_right_ip} via {args.inspire_right_interface} "
+        f"force={args.inspire_right_force_limits}, "
+        f"left={args.inspire_left_ip} via {args.inspire_left_interface} "
+        f"force={args.inspire_left_force_limits}"
     )
 
 try:
@@ -260,6 +325,10 @@ try:
         camera_pc_list=camera_pc_list,
         arm_kwargs={"servo_api": args.xarm_servo_api} if args.arm == "xarm" else None,
         hand_scale=args.hand_scale,
+        inspire_retarget=args.inspire_retarget,
+        inspire_thumb_bend_weight=args.inspire_thumb_bend_weight,
+        inspire_thumb_full_bend_deg=args.inspire_thumb_full_bend_deg,
+        allegro_retarget=args.allegro_retarget,
         hand_command_rate_hz=(
             args.allegro_command_rate_hz
             if args.hand == 'allegro_v5'
@@ -267,7 +336,7 @@ try:
         ),
         allegro_teleop_diagnostic_path=allegro_teleop_diagnostic_path,
         use_vive=args.use_vive,
-        require_left_control=args.use_vive,
+        require_left_control=args.use_vive and not unimanual_pedal,
     )
 except Exception:
     if pedal_state is not None:
@@ -277,7 +346,12 @@ except Exception:
 if allegro_teleop_diagnostic_path is not None:
     print(f"Allegro teleop diagnostic will be saved to: {allegro_teleop_diagnostic_path}")
 
-bimanual_state_provider = pedal_state.get_state if pedal_state is not None else None
+bimanual_state_provider = (
+    pedal_state.get_state
+    if pedal_state is not None and args.hand_side == "bimanual"
+    else None
+)
+unimanual_state_provider = pedal_state.get_state if unimanual_pedal else None
 
 tactile_plotter = None
 if args.visualize_tactile_realtime:
@@ -353,6 +427,7 @@ try:
             state_policy="keyboard_control",
             loop_callback=refresh_guis,
             bimanual_state_provider=bimanual_state_provider,
+            unimanual_state_provider=unimanual_state_provider,
         )
 
         if state == "exit":
@@ -378,6 +453,7 @@ try:
             state_policy="keyboard_control",
             loop_callback=refresh_guis,
             bimanual_state_provider=bimanual_state_provider,
+            unimanual_state_provider=unimanual_state_provider,
         )
         print("Stopping recording session:", name)
         cs.stop()
@@ -409,50 +485,50 @@ try:
         save_event.clear()
         stop_event.clear()
 
-        if state != "exit":
-            grasp_success = wait_for_grasp_result()
-            if grasp_success is not None:
-                success_count += int(grasp_success)
-                fail_count += int(not grasp_success)
-                os.makedirs(episode_abs_path, exist_ok=True)
-                grasp_json_path = os.path.join(episode_abs_path, "grasp_result.json")
-                with open(grasp_json_path, "w") as file:
-                    json.dump(
-                        {
-                            "episode": last_idx,
-                            "grasp_success": grasp_success,
-                        },
-                        file,
-                        indent=2,
-                    )
+        # if state != "exit":
+        #     grasp_success = wait_for_grasp_result()
+        #     if grasp_success is not None:
+        #         success_count += int(grasp_success)
+        #         fail_count += int(not grasp_success)
+        #         os.makedirs(episode_abs_path, exist_ok=True)
+        #         grasp_json_path = os.path.join(episode_abs_path, "grasp_result.json")
+        #         with open(grasp_json_path, "w") as file:
+        #             json.dump(
+        #                 {
+        #                     "episode": last_idx,
+        #                     "grasp_success": grasp_success,
+        #                 },
+        #                 file,
+        #                 indent=2,
+        #             )
 
-                paired_human_episode = int(
-                    input(
-                        "Enter the episode number of paired human sequence "
-                        f"for {args.name}: "
-                    )
-                )
-                paired_info_json_path = os.path.join(
-                    episode_abs_path,
-                    "paired_human_episode.json",
-                )
-                with open(paired_info_json_path, "w") as file:
-                    json.dump(
-                        {
-                            "human hand episode": last_idx,
-                            "paired human episode": paired_human_episode,
-                        },
-                        file,
-                        indent=2,
-                    )
+        #         # paired_human_episode = int(
+        #         #     input(
+        #         #         "Enter the episode number of paired human sequence "
+        #         #         f"for {args.name}: "
+        #         #     )
+        #         # )
+        #         # paired_info_json_path = os.path.join(
+        #         #     episode_abs_path,
+        #         #     "paired_human_episode.json",
+        #         # )
+        #         # with open(paired_info_json_path, "w") as file:
+        #         #     json.dump(
+        #         #         {
+        #         #             "human hand episode": last_idx,
+        #         #             "paired human episode": paired_human_episode,
+        #         #         },
+        #         #         file,
+        #         #         indent=2,
+        #         #     )
 
-                print(
-                    f"Current Success count: {success_count} / "
-                    f"Failure count: {fail_count}"
-                )
+        #         print(
+        #             f"Current Success count: {success_count} / "
+        #             f"Failure count: {fail_count}"
+        #         )
 
-        grasp_yes_event.clear()
-        grasp_no_event.clear()
+        # grasp_yes_event.clear()
+        # grasp_no_event.clear()
         print(f"============== episode {last_idx} done =========================")
 
         if state == "exit":

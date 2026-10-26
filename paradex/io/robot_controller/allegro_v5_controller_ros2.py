@@ -8,10 +8,11 @@ from rclpy.node import Node
 from rclpy.executors import SingleThreadedExecutor
 
 from sensor_msgs.msg import JointState
-from std_msgs.msg import Int32MultiArray
+from std_msgs.msg import Int32MultiArray, String
 
 JOINT_STATE_SUFFIX = '/allegroHand_0/joint_states'
 COMMAND_SUFFIX = '/allegroHand_0/joint_cmd'
+LIB_COMMAND_SUFFIX = '/allegroHand_0/lib_cmd'
 TACTILE_SUFFIX = '/allegroHand_0/tactile_sensors'
 
 MAX_ANGLE = 2.1
@@ -23,15 +24,10 @@ RECV_MIN_INTERVAL = 1.0 / RECV_RATE_HZ
 DEFAULT_VAL = None
 
 # Allegro v5 driver joint names: joint_<i>_0, finger blocks 0-3 index,
-# 4-7 middle, 8-11 ring, 12-15 thumb.  This is also the exact action order
-# produced by ``hand_regargetor.allegro_v5`` and used by CaptureSession.
+# 4-7 middle, 8-11 ring, 12-15 thumb. The replay/URDF order is identical
+# to the driver's order, so positions and derivatives pass through unchanged.
 DRIVER_JOINT_ORDER = [f"joint_{i}_0" for i in range(16)]
 LOGICAL_JOINT_ORDER = list(DRIVER_JOINT_ORDER)
-
-LOGICAL_TO_DRIVER_IDX = np.array(
-    [LOGICAL_JOINT_ORDER.index(name) for name in DRIVER_JOINT_ORDER],
-    dtype=int,
-)
 
 
 class _StateReceiverNode(Node):
@@ -39,6 +35,7 @@ class _StateReceiverNode(Node):
         super().__init__(f'allegro_v5_state_receiver{node_suffix}')
         self._shared = shared
         self._missing_warned = False
+        self._field_length_warned = set()
         self._last_state_t = 0.0
         self._last_tactile_t = 0.0
         topic = f'/{namespace}{JOINT_STATE_SUFFIX}' if namespace else JOINT_STATE_SUFFIX
@@ -77,27 +74,57 @@ class _StateReceiverNode(Node):
                 self._missing_warned = True
             return
 
-        pos = np.array([name_to_pos[n] for n in LOGICAL_JOINT_ORDER], dtype=float)
+        driver_pos = np.array(
+            [name_to_pos[n] for n in DRIVER_JOINT_ORDER], dtype=float
+        )
+        pos = driver_pos
+
+        def ordered_optional_field(values, field_name):
+            if not values:
+                return np.full(action_dof, np.nan, dtype=float)
+            if len(values) != len(msg.name):
+                if field_name not in self._field_length_warned:
+                    self.get_logger().warn(
+                        f'Ignoring {field_name} with length {len(values)}; '
+                        f'expected {len(msg.name)} values matching joint names.'
+                    )
+                    self._field_length_warned.add(field_name)
+                return np.full(action_dof, np.nan, dtype=float)
+            by_name = dict(zip(msg.name, values))
+            driver_values = np.array(
+                [by_name[name] for name in DRIVER_JOINT_ORDER], dtype=float
+            )
+            return driver_values
+
+        velocity = ordered_optional_field(msg.velocity, 'velocity')
+        effort = ordered_optional_field(msg.effort, 'effort')
 
         with self._shared.lock:
             self._shared.joint_value = pos.copy()
+            self._shared.joint_velocity = velocity
+            self._shared.joint_effort = effort
             self._shared.state_time = time.monotonic()
             if not self._shared.connection_event.is_set():
                 self._shared.action = pos.copy()
                 self._shared.connection_event.set()
 
 
-def _publish_loop(shared, pub_cmd, exit_event, get_clock):
+def _publish_loop(shared, pub_cmd, exit_event, command_paused_event, get_clock):
     """Plain Python loop publishing commands at COMMAND_RATE_HZ.
     No executor / timer overhead -> tighter rate vs SingleThreadedExecutor.
     """
     period = 1.0 / COMMAND_RATE_HZ
     while not exit_event.is_set():
         t0 = time.perf_counter()
+        if command_paused_event.is_set():
+            time.sleep(period)
+            continue
         if shared.connection_event.is_set():
             with shared.lock:
                 action = shared.action.copy()
                 joint_value = shared.joint_value.copy()
+                joint_velocity = shared.joint_velocity.copy()
+                joint_effort = shared.joint_effort.copy()
                 tactile = None if shared.tactile is None else shared.tactile.copy()
                 max_velocity = (
                     None
@@ -117,18 +144,20 @@ def _publish_loop(shared, pub_cmd, exit_event, get_clock):
                     -max_step,
                     max_step,
                 )
-            with shared.lock:
-                shared.last_published_action = action.copy()
-            driver_action = action[LOGICAL_TO_DRIVER_IDX]
+            driver_action = action
             msg = JointState()
             msg.header.stamp = get_clock().now().to_msg()
             msg.name = list(DRIVER_JOINT_ORDER)
             msg.position = driver_action.tolist()
             pub_cmd.publish(msg)
+            with shared.lock:
+                shared.last_published_action = action.copy()
             if shared.save_event.is_set():
                 shared.data["action"].append(action.copy())
                 shared.data["time"].append(time.time())
                 shared.data["position"].append(joint_value.copy())
+                shared.data["velocity"].append(joint_velocity.copy())
+                shared.data["effort"].append(joint_effort.copy())
                 if "tactile" in shared.data and tactile is not None:
                     shared.data["tactile"].append(tactile)
         sleep_for = period - (time.perf_counter() - t0)
@@ -148,6 +177,8 @@ class _Shared:
         self.last_published_action = None
         self.max_command_velocity_rad_s = None
         self.joint_value = np.zeros(action_dof, dtype=float)
+        self.joint_velocity = np.full(action_dof, np.nan, dtype=float)
+        self.joint_effort = np.full(action_dof, np.nan, dtype=float)
         self.state_time = None
         self.tactile = None
         # ``perf_counter`` time of the most recently accepted tactile packet.
@@ -176,6 +207,7 @@ class AllegroController:
 
         self.exit_event = Event()
         self.error_event = Event()
+        self.command_paused_event = Event()
 
         self._shared = _Shared()
         self.capture_path = None
@@ -199,8 +231,18 @@ class AllegroController:
             if self.command_enabled
             else None
         )
+        lib_cmd_topic = (
+            f'/{self.namespace}{LIB_COMMAND_SUFFIX}'
+            if self.namespace else LIB_COMMAND_SUFFIX
+        )
+        self._pub_lib_cmd = (
+            self._state_node.create_publisher(String, lib_cmd_topic, 10)
+            if self.command_enabled
+            else None
+        )
         self.state_topic = self._state_node.state_topic
         self.command_topic = cmd_topic
+        self.library_command_topic = lib_cmd_topic
         self._get_clock = self._state_node.get_clock
 
         self._state_executor = SingleThreadedExecutor()
@@ -225,7 +267,13 @@ class AllegroController:
 
     def _publish_loop_wrapper(self):
         try:
-            _publish_loop(self._shared, self._pub_cmd, self.exit_event, self._get_clock)
+            _publish_loop(
+                self._shared,
+                self._pub_cmd,
+                self.exit_event,
+                self.command_paused_event,
+                self._get_clock,
+            )
         except Exception as exc:
             self._state_node.get_logger().error(f"Command publish loop failed: {exc}")
             self.error_event.set()
@@ -245,6 +293,69 @@ class AllegroController:
         assert action.shape[0] == action_dof
         with self._shared.lock:
             self._shared.action = action.copy()
+
+    def run_driver_home(
+        self,
+        *,
+        settle_seconds=0.5,
+        repeats=3,
+        discovery_timeout_seconds=1.0,
+    ):
+        """Enter the vendor HOME/place mode without joint_cmd overriding it.
+
+        The V5 grasp driver changes the CAN hand state to ``place`` only from
+        its ``lib_cmd=home`` callback. Its regular ``joint_cmd`` callback only
+        selects JOINT_PD. Pause this controller's 100 Hz joint publisher while
+        HOME is processed, then resume from the measured pose so the next
+        custom position command is continuous.
+        """
+
+        if not self.command_enabled:
+            raise RuntimeError("Allegro command publishing is disabled for this controller.")
+        settle_seconds = float(settle_seconds)
+        repeats = int(repeats)
+        discovery_timeout_seconds = float(discovery_timeout_seconds)
+        if not np.isfinite(settle_seconds) or settle_seconds < 0.0:
+            raise ValueError("settle_seconds must be finite and non-negative")
+        if repeats < 1:
+            raise ValueError("repeats must be positive")
+        if (
+            not np.isfinite(discovery_timeout_seconds)
+            or discovery_timeout_seconds < 0.0
+        ):
+            raise ValueError(
+                "discovery_timeout_seconds must be finite and non-negative"
+            )
+
+        self.command_paused_event.set()
+        try:
+            # Allow an in-flight joint_cmd callback to finish before HOME.
+            time.sleep(2.0 / COMMAND_RATE_HZ)
+            discovery_deadline = time.monotonic() + discovery_timeout_seconds
+            while (
+                self._pub_lib_cmd.get_subscription_count() < 1
+                and time.monotonic() < discovery_deadline
+            ):
+                time.sleep(0.02)
+            if self._pub_lib_cmd.get_subscription_count() < 1:
+                raise RuntimeError(
+                    "No Allegro driver subscriber discovered on "
+                    f"{self.library_command_topic}; vendor HOME was not sent."
+                )
+            message = String()
+            message.data = "home"
+            for _ in range(repeats):
+                self._pub_lib_cmd.publish(message)
+                time.sleep(0.05)
+            if settle_seconds > 0.0:
+                time.sleep(settle_seconds)
+        finally:
+            with self._shared.lock:
+                measured = self._shared.joint_value.copy()
+                self._shared.action = measured.copy()
+                self._shared.last_published_action = measured.copy()
+            self.command_paused_event.clear()
+        return measured
 
     def set_command_slew_rate(self, max_velocity_rad_s=None, *, initial_action=None):
         """Limit physical command-output velocity, or pass ``None`` to disable.
@@ -303,7 +414,13 @@ class AllegroController:
 
     def start(self, save_path):
         self.capture_path = save_path
-        data = {"action": [], "time": [], "position": []}
+        data = {
+            "action": [],
+            "time": [],
+            "position": [],
+            "velocity": [],
+            "effort": [],
+        }
         if self.tactile_enabled:
             data["tactile"] = []
         self._shared.data = data
@@ -320,17 +437,19 @@ class AllegroController:
         self.exit_event.set()
         if self._shared.save_event.is_set():
             self.stop()
+        # Stop publishing and spinning before destroying ROS objects/context.
+        # Otherwise a live thread can create a wait set after rcl_shutdown.
+        if self._cmd_thread is not None:
+            self._cmd_thread.join(timeout=2.0)
+        self._state_executor.shutdown()
+        self._state_thread.join(timeout=2.0)
         try:
             self._state_executor.remove_node(self._state_node)
         except Exception:
             pass
-        self._state_executor.shutdown()
         self._state_node.destroy_node()
-        if self._owns_rclpy:
+        if self._owns_rclpy and rclpy.ok():
             rclpy.shutdown()
-        self._state_thread.join(timeout=2.0)
-        if self._cmd_thread is not None:
-            self._cmd_thread.join(timeout=2.0)
 
     def get_data(self):
         with self._shared.lock:
@@ -339,6 +458,8 @@ class AllegroController:
             )
             return {
                 'qpos': self._shared.joint_value.copy(),
+                'qvel': self._shared.joint_velocity.copy(),
+                'effort': self._shared.joint_effort.copy(),
                 'action': self._shared.action.copy(),
                 'published_action': (
                     None

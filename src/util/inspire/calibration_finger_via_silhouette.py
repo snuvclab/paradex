@@ -1,6 +1,7 @@
 import argparse
 import json
 import os
+import sys
 from typing import Dict, Tuple, Optional
 
 import trimesh
@@ -12,6 +13,18 @@ from paradex.image.grid import make_image_grid
 from paradex.image.overlay import overlay_mask
 import torch
 import pytorch_kinematics as pk
+
+# Recent PyTorch versions can build nvdiffrast's JIT extension successfully but
+# omit its build directory from sys.path before nvdiffrast imports the module.
+try:
+    from torch.utils.cpp_extension import _get_build_directory
+
+    _nvdr_plugin_dir = _get_build_directory("nvdiffrast_plugin", verbose=False)
+    if _nvdr_plugin_dir not in sys.path:
+        sys.path.insert(0, _nvdr_plugin_dir)
+except Exception:
+    pass
+
 try:
     import nvdiffrast.torch as dr
 except Exception:
@@ -194,6 +207,11 @@ class TorchBatchRenderer:
 
     def render_multi(self, mesh_list):
         obj_dicts = mesh_list
+        if not obj_dicts:
+            raise RuntimeError(
+                "URDF produced no renderable meshes; check that mesh paths are "
+                "accessible on this execution host"
+            )
         mtx = self.intr_opengl @ self.flip_z @ self.cam_extrs_t
 
         stacked_pos = []
@@ -320,7 +338,8 @@ class TorchUrdfKinematics:
         self.device = device
         self.urdf = yourdfpy.URDF.load(urdf_path, build_scene_graph=False)
         self.urdf_dir = os.path.dirname(urdf_path)
-        with open(urdf_path, "r") as f:
+        # Pass bytes so lxml accepts URDFs that contain an XML encoding declaration.
+        with open(urdf_path, "rb") as f:
             self.chain = pk.build_chain_from_urdf(f.read()).to(dtype=torch.float32, device=device)
         self.joint_names = self.chain.get_joint_parameter_names()
 

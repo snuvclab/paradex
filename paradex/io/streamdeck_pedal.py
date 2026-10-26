@@ -46,7 +46,7 @@ class MiddlePedalState:
             from StreamDeck.DeviceManager import DeviceManager
         except ImportError as exc:
             raise RuntimeError(
-                "The streamdeck package is required for bimanual pedal control."
+                "The streamdeck package is required for pedal teleoperation control."
             ) from exc
 
         devices = [

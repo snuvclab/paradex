@@ -1,0 +1,116 @@
+<mujoco model="xarm_allegro_v5">
+  <compiler angle="radian"/>
+
+  <option integrator="implicitfast" cone="elliptic" iterations="50" ls_iterations="20"/>
+
+  <worldbody>
+    <body name="link_base">
+      <inertial pos="0 0 0.09103" quat="0.981065 0.000747228 -0.0021866 -0.193666" mass="2.7" diaginertia="0.00495024 0.00494031 0.00221894"/>
+      <body name="link1" pos="-0.000777 0.000771172 0.265956" quat="0.999999 -0.000490956 -0.00103391 0" gravcomp="1">
+        <inertial pos="-0.002 0.02692 -0.01332" quat="0.98314 0.180751 -0.00455223 0.0272973" mass="2.16" diaginertia="0.00539487 0.00519906 0.00281397"/>
+        <joint name="joint1" range="-6.28319 6.28319" actuatorfrcrange="-50 50" damping="0.5" frictionloss="1" actuatorfrclimited="false"/>
+        <body name="link2" pos="-4.07262e-05 -3.84035e-08 -7.70125e-12" quat="0.706944 -0.707268 0.000398132 0.00106371" gravcomp="1">
+          <inertial pos="0.03531 -0.21398 0.03386" quat="0.71118 0.614686 0.139936 -0.311132" mass="1.71" diaginertia="0.017867 0.017867 0.017867"/>
+          <joint name="joint2" range="-2.059 2.0944" actuatorfrcrange="-50 50" damping="0.5" frictionloss="1" actuatorfrclimited="false"/>
+          <body name="link3" pos="0.0531621 -0.284492 0.00040263" quat="1 0.000809061 -0.000541136 -7.70088e-07" gravcomp="1">
+            <inertial pos="0.06781 0.10749 0.01457" quat="0.119516 0.409082 -0.734824 0.527638" mass="1.384" diaginertia="0.004543 0.004543 0.004543"/>
+            <joint name="joint3" range="-3.927 0.19198" actuatorfrcrange="-32 32" damping="0.5" frictionloss="1" actuatorfrclimited="false"/>
+            <body name="link4" pos="0.0777893 0.341643 -6.04757e-05" quat="0.707044 -0.707169 0.000714901 0.000714901" gravcomp="1">
+              <inertial pos="-0.00021 0.02578 -0.02538" quat="0.994019 0.0752563 -0.00686804 0.0788347" mass="1.115" diaginertia="0.00440091 0.00406855 0.00103407"/>
+              <joint name="joint4" range="-6.28319 6.28319" actuatorfrcrange="-32 32" damping="0.5" frictionloss="1" actuatorfrclimited="false"/>
+              <body name="link5" pos="-0.000131 0.00218 0" quat="0.707107 0.707107 0 0" gravcomp="1">
+                <inertial pos="0.05428 0.01781 0.00543" quat="-0.0766302 0.578118 -0.269638 0.766291" mass="1.275" diaginertia="0.00289757 0.0023276 0.000951789"/>
+                <joint name="joint5" range="-1.69297 3.14159" actuatorfrcrange="-32 32" damping="0.5" frictionloss="1" actuatorfrclimited="false"/>
+                <body name="link6" pos="0.076166 0.095586 0.000215" quat="0.707082 -0.707132 8.83884e-05 -2.11823e-06" gravcomp="1">
+                  <inertial pos="0 0.00064 -0.00952" quat="0 0.707107 0 0.707107" mass="0.1096" diaginertia="7.9715e-05 4.8111e-05 4.5293e-05"/>
+                  <joint name="joint6" range="-6.28319 6.28319" actuatorfrcrange="-20 20" damping="0.5" frictionloss="1" actuatorfrclimited="false"/>
+                  <body name="wrist" pos="0 -0.007 0.146" quat="0.707105 5.93571e-12 1.87637e-06 -0.707109" gravcomp="1">
+                    <body name="palm_link" gravcomp="1">
+                      <inertial pos="0 0 0.0475" mass="0.4154" diaginertia="0.0001 0.0001 0.0001"/>
+                      <body name="link_0_0" pos="0 0.0405 -0.00945" quat="0.999048 -0.0436194 0 0" gravcomp="1">
+                        <inertial pos="0 0 0" quat="0.99546 0.00522746 -0.091558 0.0254773" mass="0.0176" diaginertia="1.32064e-05 1.22498e-05 2.64678e-06"/>
+                        <joint name="joint_0_0" solreflimit="0.005" range="-0.47 0.47" armature="0.0001" damping="0.01" limited="true" actuatorfrclimited="false"/>
+                        <body name="link_1_0" pos="0 0 0.021" gravcomp="1">
+                          <inertial pos="0 0 0" quat="0.520175 0.478976 0.478976 0.520175" mass="0.066" diaginertia="3.12841e-05 2.91611e-05 6.09341e-06"/>
+                          <joint name="joint_1_0" solreflimit="0.005" range="-0.196 1.8" armature="0.0001" damping="0.01" axis="0 1 0" limited="true" actuatorfrclimited="false"/>
+                          <body name="link_2_0" pos="0 0 0.051" gravcomp="1">
+                            <inertial pos="0 0 0" quat="0.5 0.5 0.5 0.5" mass="0.0366" diaginertia="1.45472e-05 1.29053e-05 3.80703e-06"/>
+                            <joint name="joint_2_0" solreflimit="0.005" range="-0.174 1.709" armature="0.0001" damping="0.01" axis="0 1 0" limited="true" actuatorfrclimited="false"/>
+                            <body name="link_3_0" pos="0 0 0.0384" quat="0.997189 0 -0.0749297 0" gravcomp="1">
+                              <inertial pos="0 0 0" quat="0.5 0.5 0.5 0.5" mass="0.00569" diaginertia="2.40127e-06 1.67484e-06 1.17693e-06"/>
+                              <joint name="joint_3_0" solreflimit="0.005" range="-0.227 1.618" armature="0.0001" damping="0.01" axis="0 1 0" limited="true" actuatorfrclimited="false"/>
+                              <body name="link_3_0_tip" pos="0 0 0.0267" gravcomp="1">
+                                <inertial pos="0 0 0" mass="0.001" diaginertia="9.68e-07 9.68e-07 9.68e-07"/>
+                              </body>
+                            </body>
+                          </body>
+                        </body>
+                      </body>
+                      <body name="link_4_0" pos="0 0 -0.0079" gravcomp="1">
+                        <inertial pos="0 0 0" quat="0.99546 0.00522746 -0.091558 0.0254773" mass="0.0176" diaginertia="1.32064e-05 1.22498e-05 2.64678e-06"/>
+                        <joint name="joint_4_0" solreflimit="0.005" range="-0.47 0.47" armature="0.0001" damping="0.01" limited="true" actuatorfrclimited="false"/>
+                        <body name="link_5_0" pos="0 0 0.021" gravcomp="1">
+                          <inertial pos="0 0 0" quat="0.520175 0.478976 0.478976 0.520175" mass="0.066" diaginertia="3.12841e-05 2.91611e-05 6.09341e-06"/>
+                          <joint name="joint_5_0" solreflimit="0.005" range="-0.196 1.8" armature="0.0001" damping="0.01" axis="0 1 0" limited="true" actuatorfrclimited="false"/>
+                          <body name="link_6_0" pos="0 0 0.051" gravcomp="1">
+                            <inertial pos="0 0 0" quat="0.5 0.5 0.5 0.5" mass="0.0366" diaginertia="1.45472e-05 1.29053e-05 3.80703e-06"/>
+                            <joint name="joint_6_0" solreflimit="0.005" range="-0.174 1.88879" armature="0.0001" damping="0.01" axis="0 1 0" limited="true" actuatorfrclimited="false"/>
+                            <body name="link_7_0" pos="0 0 0.0384" quat="0.997189 0 -0.0749297 0" gravcomp="1">
+                              <inertial pos="0 0 0" quat="0.5 0.5 0.5 0.5" mass="0.00569" diaginertia="2.40127e-06 1.67484e-06 1.17693e-06"/>
+                              <joint name="joint_7_0" solreflimit="0.005" range="-0.227 1.618" armature="0.0001" damping="0.01" axis="0 1 0" limited="true" actuatorfrclimited="false"/>
+                              <body name="link_7_0_tip" pos="0 0 0.0267" gravcomp="1">
+                                <inertial pos="0 0 0" mass="0.001" diaginertia="9.68e-07 9.68e-07 9.68e-07"/>
+                              </body>
+                            </body>
+                          </body>
+                        </body>
+                      </body>
+                      <body name="link_8_0" pos="0.0025 -0.0405 -0.00945" quat="0.999048 0.0436194 0 0" gravcomp="1">
+                        <inertial pos="0 0 0" quat="0.99546 0.00522746 -0.091558 0.0254773" mass="0.0176" diaginertia="1.32064e-05 1.22498e-05 2.64678e-06"/>
+                        <joint name="joint_8_0" solreflimit="0.005" range="-0.47 0.47" armature="0.0001" damping="0.01" limited="true" actuatorfrclimited="false"/>
+                        <body name="link_9_0" pos="0 0 0.021" gravcomp="1">
+                          <inertial pos="0 0 0" quat="0.520175 0.478976 0.478976 0.520175" mass="0.066" diaginertia="3.12841e-05 2.91611e-05 6.09341e-06"/>
+                          <joint name="joint_9_0" solreflimit="0.005" range="-0.196 1.8" armature="0.0001" damping="0.01" axis="0 1 0" limited="true" actuatorfrclimited="false"/>
+                          <body name="link_10_0" pos="0 0 0.051" gravcomp="1">
+                            <inertial pos="0 0 0" quat="0.5 0.5 0.5 0.5" mass="0.0366" diaginertia="1.45472e-05 1.29053e-05 3.80703e-06"/>
+                            <joint name="joint_10_0" solreflimit="0.005" range="-0.174 1.898" armature="0.0001" damping="0.01" axis="0 1 0" limited="true" actuatorfrclimited="false"/>
+                            <body name="link_11_0" pos="0 0 0.0384" quat="0.997189 0 -0.0749297 0" gravcomp="1">
+                              <inertial pos="0 0 0" quat="0.5 0.5 0.5 0.5" mass="0.00569" diaginertia="2.40127e-06 1.67484e-06 1.17693e-06"/>
+                              <joint name="joint_11_0" solreflimit="0.005" range="-0.227 1.618" armature="0.0001" damping="0.01" axis="0 1 0" limited="true" actuatorfrclimited="false"/>
+                              <body name="link_11_0_tip" pos="0 0 0.0267" gravcomp="1">
+                                <inertial pos="0 0 0" mass="0.001" diaginertia="9.68e-07 9.68e-07 9.68e-07"/>
+                              </body>
+                            </body>
+                          </body>
+                        </body>
+                      </body>
+                      <body name="link_12_0" pos="0.002 0.027 -0.06342" quat="-0.477714 0.521334 0.521334 0.477714" gravcomp="1">
+                        <inertial pos="0 0 0" quat="0.790345 0.612646 0.00415506 0.00170531" mass="0.0446" diaginertia="5.44036e-05 5.07545e-05 6.43189e-06"/>
+                        <joint name="joint_12_0" solreflimit="0.005" range="0 1.88418" armature="0.0001" damping="0.01" axis="-1 0 0" limited="true" actuatorfrclimited="false"/>
+                        <body name="link_13_0" pos="-0.001 0 0.06874" gravcomp="1">
+                          <inertial pos="0 0 0" quat="0.99567 -0.0927403 -5.38842e-05 -0.00629079" mass="0.0173" diaginertia="1.52002e-05 1.37061e-05 2.46665e-06"/>
+                          <joint name="joint_13_0" solreflimit="0.005" range="-0.26 1.78" armature="0.0001" damping="0.01" limited="true" actuatorfrclimited="false"/>
+                          <body name="link_14_0" quat="0.997189 0 -0.0749297 0" gravcomp="1">
+                            <inertial pos="0 0 0" quat="0.491771 0.51789 0.513259 0.475937" mass="0.03607" diaginertia="1.54053e-05 1.39209e-05 3.65383e-06"/>
+                            <joint name="joint_14_0" solreflimit="0.005" range="0 1.9" armature="0.0001" damping="0.01" axis="0 1 0" limited="true" actuatorfrclimited="false"/>
+                            <body name="link_15_0" pos="0 0 0.038" gravcomp="1">
+                              <inertial pos="0 0 0" quat="0.501084 0.505526 0.517078 0.475383" mass="0.0338" diaginertia="1.13028e-05 1.06152e-05 2.92197e-06"/>
+                              <joint name="joint_15_0" solreflimit="0.005" range="-0.12712 1.8" armature="0.0001" damping="0.01" axis="0 1 0" limited="true" actuatorfrclimited="false"/>
+                              <body name="link_15_0_tip" pos="0 0 0.05" gravcomp="1">
+                                <inertial pos="0 0 0" mass="0.001" diaginertia="9.68e-07 9.68e-07 9.68e-07"/>
+                              </body>
+                            </body>
+                          </body>
+                        </body>
+                      </body>
+                    </body>
+                  </body>
+                </body>
+              </body>
+            </body>
+          </body>
+        </body>
+      </body>
+    </body>
+  </worldbody>
+</mujoco>

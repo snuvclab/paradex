@@ -130,6 +130,7 @@ _ALLEGRO_V5_RAW_ERGONOMIC_FIELDS = (
 # thumb output capped at its physical positive limit.
 _ALLEGRO_V5_THUMB_BASE_FLEX_GAIN = 2.0
 _ALLEGRO_V5_THUMB_SECONDARY_FLEX_GAIN = 1.65
+_ALLEGRO_V5_THUMB_OPPOSITION_RANGE_DEG = 75.0
 # Allegro v5 action order is index, middle, ring, thumb.  MANUS tip features
 # retain the native thumb, index, middle, ring, pinky order.  There is no
 # separate Allegro pinky, so it intentionally has no target block here.
@@ -234,6 +235,26 @@ def clip_allegro_v5_safe_action(action):
         raise ValueError(f"Allegro v5 action must have shape (16,), got {action.shape}")
     data = _load_allegro_v5_direct_anchor_data()
     return np.clip(action, data["safe_lower"], data["safe_upper"])
+
+
+def _clip_allegro_v5_physical_action(action):
+    """Clamp a raw command to the allegro_right_A.urdf joint limits."""
+    action = np.asarray(action, dtype=np.float64)
+    if action.shape != (16,) or not np.all(np.isfinite(action)):
+        raise ValueError(
+            f"Allegro v5 action must be finite shape (16,), got {action.shape}"
+        )
+    return np.clip(action, _ALLEGRO_V5_PHYSICAL_LOWER, _ALLEGRO_V5_PHYSICAL_UPPER)
+
+
+def _allegro_v5_thumb_opposition_from_manus_spread(spread_deg):
+    """Map MANUS thumb spread to inward Allegro joint-13 motion."""
+    normalized = np.clip(
+        float(spread_deg) / _ALLEGRO_V5_THUMB_OPPOSITION_RANGE_DEG,
+        0.0,
+        1.0,
+    )
+    return normalized * _ALLEGRO_V5_PHYSICAL_UPPER[13]
 
 
 def _allegro_v5_manus_tip_feature(hand_pose_frame):
@@ -1161,9 +1182,14 @@ def allegro(hand_pose_frame):
 _INSPIRE_FINGER_ANGLE_RANGE_DEG = 176.7 - 19.0
 _INSPIRE_THUMB_BEND_RANGE_DEG = 53.6 - (-13.0)
 _INSPIRE_THUMB_ROTATE_RANGE_DEG = 165.0 - 90.0
-_INSPIRE_THUMB_EXTRA_BEND_GAIN = 3.0
+_INSPIRE_THUMB_EXTRA_BEND_GAIN = 3.4
 _INSPIRE_THUMB_EXTRA_BEND_COMMAND = -500.0
 _INSPIRE_THUMB_SECONDARY_GAIN = 0.8
+# Inspire-only ThumbMCPStretch mapping. Measured MANUS full thumb flexion
+# peaks near 47 deg, so the shared 66.6 deg range and 0.8 gain (still used by
+# Allegro V5) left the RH56 thumb at ~57% of its travel.
+_INSPIRE_DFTP_THUMB_STRETCH_FULL_DEG = 45.0
+_INSPIRE_DFTP_THUMB_STRETCH_GAIN = 1.0
 
 
 def _open_to_closed_command(flexion_deg, range_deg):
@@ -1225,8 +1251,14 @@ def inspire_from_manus_ergonomics(ergonomics):
         1000.0,
     )
     command[5] = np.clip(
-        _inspire_thumb_secondary_fraction(ergonomics["ThumbMCPStretch"])
-        * 1000.0,
+        (
+            1000.0
+            - _open_to_closed_command(
+                ergonomics["ThumbMCPStretch"],
+                _INSPIRE_DFTP_THUMB_STRETCH_FULL_DEG,
+            )
+        )
+        * _INSPIRE_DFTP_THUMB_STRETCH_GAIN,
         0.0,
         1000.0,
     )
@@ -1525,10 +1557,11 @@ def _allegro_v5_raw_from_manus_ergonomics(ergonomics):
     it uses the MANUS angles whenever the complete named payload is present.
 
     The non-thumb MCP bend keeps the legacy ``(angle - 0.35) * 1.5``
-    calibration, while PIP/DIP retain their direct radians.  The thumb spread
-    and distal bends preserve the signs/scales of the old Euler/rotation-matrix
-    extraction.  Returning the existing index, middle, ring, thumb order is
-    essential because the v5 ROS controller consumes that order directly.
+    calibration, while PIP/DIP retain their direct radians.  Thumb spread is
+    normalized over MANUS's 0..75 degree opposition range so increasing inward
+    motion drives positive Allegro joint 13 motion.  Returning the existing
+    index, middle, ring, thumb order is essential because the v5 ROS controller
+    consumes that order directly.
     """
     if not isinstance(ergonomics, dict):
         raise ValueError("MANUS ergonomics must be a name-to-angle mapping")
@@ -1572,10 +1605,8 @@ def _allegro_v5_raw_from_manus_ergonomics(ergonomics):
         - _inspire_thumb_secondary_fraction(values["ThumbMCPStretch"])
     ) * _ALLEGRO_V5_PHYSICAL_UPPER[12] * _ALLEGRO_V5_THUMB_BASE_FLEX_GAIN
     action[12] = min(action[12], _ALLEGRO_V5_PHYSICAL_UPPER[12])
-    action[13] = (
-        -np.deg2rad(values["ThumbMCPSpread"])
-        * _ALLEGRO_V5_THUMB_SECONDARY_FLEX_GAIN
-        - 1.57
+    action[13] = _allegro_v5_thumb_opposition_from_manus_spread(
+        values["ThumbMCPSpread"]
     )
     action[14] = min(
         (
@@ -1593,7 +1624,7 @@ def _allegro_v5_raw_from_manus_ergonomics(ergonomics):
         ),
         _ALLEGRO_V5_PHYSICAL_UPPER[15],
     )
-    return action
+    return _clip_allegro_v5_physical_action(action)
 
 
 def _allegro_v5_raw(hand_pose_frame, ergonomics=None):
@@ -1651,13 +1682,15 @@ def _allegro_v5_raw(hand_pose_frame, ergonomics=None):
     thumb_meta = np.dot(hand_pose_frame["wrist"][:3,:3].T, hand_pose_frame["thumb_metacarpal"][:3,:3])
     thumb_meta_angle = R.from_matrix(thumb_meta).as_euler("xyz")
     allegro_angles[12] = thumb_meta_angle[0] 
-    allegro_angles[13] = -thumb_meta_angle[2]-1.57
+    allegro_angles[13] = _allegro_v5_thumb_opposition_from_manus_spread(
+        np.rad2deg(thumb_meta_angle[2])
+    )
 
     for i, (parent_name, joint_name) in enumerate([("thumb_metacarpal", "thumb_proximal"),("thumb_proximal", "thumb_distal")]):
         rot_mat = np.linalg.inv(hand_pose_frame[parent_name][:3,:3]) @ hand_pose_frame[joint_name][:3,:3]
         allegro_angles[14+i] = rot_mat[2, 1] * 1.2
 
-    return allegro_angles
+    return _clip_allegro_v5_physical_action(allegro_angles)
 
 
 def allegro_v5(hand_pose_frame, ergonomics=None):

@@ -42,10 +42,16 @@ def _resolve_hand(name, is_right=True, scale=1.0):
     return fn
 
 
+_INSPIRE_HANDS = ("inspire", "inspire_dftp")
+INSPIRE_RETARGET_MODES = ("manus", "dexpilot")
+
+
 class Retargetor(): # Input is only from Xsens
     def __init__(self, arm_name=None, hand_name=None, hand_side="Right",
                  hand_name_left=None, hand_name_right=None, hand_scale=1.0,
-                 teleop_name=None):
+                 teleop_name=None, inspire_retarget="manus",
+                 inspire_thumb_bend_weight=0.7, inspire_thumb_full_bend_deg=60.0,
+                 allegro_retarget="direct"):
         self.arm_name = arm_name
         self.teleop_name = teleop_name
         self.hand_name = hand_name
@@ -54,6 +60,24 @@ class Retargetor(): # Input is only from Xsens
         self.hand_scale = float(hand_scale)
         if not np.isfinite(self.hand_scale) or self.hand_scale <= 0.0:
             raise ValueError(f"hand_scale must be a positive finite number, got {hand_scale}")
+        if inspire_retarget not in INSPIRE_RETARGET_MODES:
+            raise ValueError(
+                f"inspire_retarget must be one of {INSPIRE_RETARGET_MODES}, got {inspire_retarget}"
+            )
+        # "manus": MANUS ergonomics mapping plus the thumb lock.
+        # "dexpilot": AnyTeleop-style fingertip-vector optimization, no thumb lock.
+        self.inspire_retarget = inspire_retarget
+        self.inspire_thumb_bend_weight = inspire_thumb_bend_weight
+        self.inspire_thumb_full_bend_deg = inspire_thumb_full_bend_deg
+        if allegro_retarget not in ("direct", "dexpilot"):
+            raise ValueError("allegro_retarget must be direct or dexpilot")
+        self.allegro_retarget = allegro_retarget
+        left = hand_name_left if hand_name_left is not None else hand_name
+        if allegro_retarget == "dexpilot" and (
+            (hand_side == "Left" and hand_name == "allegro_v5")
+            or (hand_side == "Bimanual" and left == "allegro_v5")
+        ):
+            raise ValueError("Allegro V5 DexPilot currently supports the right hand only")
 
         if arm_name not in [None, "xarm", "franka"]:
             raise ValueError("Invalid arm name")
@@ -83,6 +107,22 @@ class Retargetor(): # Input is only from Xsens
                 is_right=(self.hand_side != "Left"),
                 scale=self.hand_scale,
             )
+        if self.inspire_retarget == "dexpilot":
+            self._use_inspire_dexpilot(hand_name, hand_name_left, hand_name_right)
+        right_name = hand_name_right if hand_name_right is not None else hand_name
+        if self.allegro_retarget == "dexpilot" and (
+            (self.hand_side == "Right" and hand_name == "allegro_v5")
+            or (self.hand_side == "Bimanual" and right_name == "allegro_v5")
+        ):
+            from paradex.retargetor.allegro_v5_dexpilot import AsyncAllegroV5DexPilotRetargeter
+
+            print("Building right Allegro V5 DexPilot retargeter...", flush=True)
+            retargeter = AsyncAllegroV5DexPilotRetargeter(scaling_factor=self.hand_scale)
+            if self.hand_side == "Bimanual":
+                self.hand_retargetor["Right"] = retargeter
+            else:
+                self.hand_retargetor = retargeter
+            print("Allegro V5 DexPilot ready.", flush=True)
 
         if self.hand_side == "Bimanual":
             if self.arm_name is not None:
@@ -117,6 +157,46 @@ class Retargetor(): # Input is only from Xsens
         else:
             self.device2wrist = DEVICE2WRIST[self.hand_name].copy()
             self.device2global = np.eye(4)
+
+    def _use_inspire_dexpilot(self, hand_name, hand_name_left, hand_name_right):
+        import time
+
+        print("Building Inspire DexPilot retargeters (takes a few seconds)...", flush=True)
+        build_start = time.monotonic()
+        from paradex.retargetor.inspire_dexpilot import (
+            AsyncInspireDftpDexPilotRetargeter as InspireDftpDexPilotRetargeter,
+        )
+
+        if self.hand_side == "Bimanual":
+            names = {
+                "Left": hand_name_left if hand_name_left is not None else hand_name,
+                "Right": hand_name_right if hand_name_right is not None else hand_name,
+            }
+            for side, name in names.items():
+                if name in _INSPIRE_HANDS:
+                    self.hand_retargetor[side] = InspireDftpDexPilotRetargeter(
+                        is_right=(side == "Right"),
+                        scaling_factor=self.hand_scale,
+                        wait=False,
+                        thumb_bend_weight=self.inspire_thumb_bend_weight,
+                        thumb_full_bend_deg=self.inspire_thumb_full_bend_deg,
+                    )
+            # Workers start in parallel; wait for both before teleop begins.
+            for side, name in names.items():
+                if name in _INSPIRE_HANDS:
+                    self.hand_retargetor[side].wait_ready()
+        elif hand_name in _INSPIRE_HANDS:
+            self.hand_retargetor = InspireDftpDexPilotRetargeter(
+                is_right=(self.hand_side != "Left"),
+                scaling_factor=self.hand_scale,
+                thumb_bend_weight=self.inspire_thumb_bend_weight,
+                thumb_full_bend_deg=self.inspire_thumb_full_bend_deg,
+            )
+        print(
+            f"Inspire DexPilot retargeters ready ({time.monotonic() - build_start:.1f}s); "
+            "teleop starting.",
+            flush=True,
+        )
 
     def _compute_wrist_pose(self, side, data):
         device2wrist = self.device2wrist[side] if isinstance(self.device2wrist, dict) else self.device2wrist
@@ -170,14 +250,17 @@ class Retargetor(): # Input is only from Xsens
                 else None
             )
 
+            thumb_lock = self.inspire_retarget == "manus"
             if (
-                left_name in ("inspire", "inspire_dftp")
-                and hand_action_left[5] >= 600.0
+                thumb_lock
+                and left_name in _INSPIRE_HANDS
+                and hand_action_left[5] >= 750.0
             ):
                 hand_action_left[4] = 1000.0
             if (
-                right_name in ("inspire", "inspire_dftp")
-                and hand_action_right[5] >= 600.0
+                thumb_lock
+                and right_name in _INSPIRE_HANDS
+                and hand_action_right[5] >= 750.0
             ):
                 hand_action_right[4] = 1000.0
 
@@ -237,3 +320,14 @@ class Retargetor(): # Input is only from Xsens
         else:
             self.init_human_pose = {self.hand_side: None}
             self.init_robot_pose = {self.hand_side: self.last_arm_pose[self.hand_side].copy()}
+
+    def close(self):
+        """Release optimization workers when the capture session ends."""
+        retargeters = (
+            self.hand_retargetor.values()
+            if isinstance(self.hand_retargetor, dict)
+            else (self.hand_retargetor,)
+        )
+        for retargeter in retargeters:
+            if hasattr(retargeter, "close"):
+                retargeter.close()

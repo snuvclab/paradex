@@ -23,7 +23,7 @@ from paradex.utils.file_io import find_latest_index
 from paradex.utils.keyboard_listener import listen_keyboard
 from paradex.utils.path import shared_dir
 if __package__:
-    from .allegro_pedal_pose_ui import (
+    from .pedal_pose_ui import (
         DEFAULT_POSE_A,
         DEFAULT_POSE_B,
         DEFAULT_QUEST_OPENXR_BIN,
@@ -34,7 +34,7 @@ if __package__:
         ensure_editable_pose_copy,
     )
 else:
-    from allegro_pedal_pose_ui import (
+    from pedal_pose_ui import (
         DEFAULT_POSE_A,
         DEFAULT_POSE_B,
         DEFAULT_QUEST_OPENXR_BIN,

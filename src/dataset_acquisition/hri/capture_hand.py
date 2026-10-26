@@ -32,12 +32,19 @@ preview_group.add_argument(
     help='Show live capture-PC images from the port 5484 preview API in a separate thread.',
 )
 preview_group.add_argument(
+    '--camera-preview-6735',
+    dest='camera_preview_serial',
+    action='store_const',
+    const='26256735',
+    help='Show only camera 26256735 in the independent capture-PC preview GUI.',
+)
+preview_group.add_argument(
     '--no-camera-preview',
     dest='camera_preview',
     action='store_false',
     help='Disable the independent capture-PC preview GUI (default).',
 )
-parser.set_defaults(camera_preview=False)
+parser.set_defaults(camera_preview=False, camera_preview_serial=None)
 parser.add_argument('--camera-preview-port', type=int, default=5484)
 parser.add_argument('--camera-preview-refresh-interval', type=float, default=0.2)
 parser.add_argument('--camera-preview-request-timeout', type=float, default=1.5)
@@ -61,12 +68,27 @@ cs = CaptureSession(
     human_tactile_plot_max_samples=args.human_tactile_plot_max_samples,
 )
 camera_preview = None
-if args.camera_preview:
+if args.camera_preview or args.camera_preview_serial is not None:
     from paradex.io.camera_system.capture_pc_preview import CapturePcPreviewGui
-    from paradex.utils.system import get_pc_list
+    from paradex.utils.system import get_camera_list, get_pc_list
+
+    preview_pc_list = get_pc_list()
+    preview_camera_names = None
+    if args.camera_preview_serial is not None:
+        preview_camera_names = [args.camera_preview_serial]
+        preview_pc_list = [
+            pc_name
+            for pc_name in preview_pc_list
+            if args.camera_preview_serial in get_camera_list(pc_name)
+        ]
+        if not preview_pc_list:
+            parser.error(
+                f'Camera {args.camera_preview_serial} is not assigned to any capture PC.'
+            )
 
     camera_preview = CapturePcPreviewGui(
-        pc_list=get_pc_list(),
+        pc_list=preview_pc_list,
+        camera_names=preview_camera_names,
         port=args.camera_preview_port,
         refresh_interval=args.camera_preview_refresh_interval,
         request_timeout=args.camera_preview_request_timeout,

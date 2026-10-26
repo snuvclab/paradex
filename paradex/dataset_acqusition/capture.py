@@ -3,6 +3,7 @@ import time
 import glob
 import subprocess
 import json
+import logging
 from pathlib import Path
 import numpy as np
 import chime
@@ -30,6 +31,23 @@ _VIVE_POSITION_MARGIN_M = 0.003
 _VIVE_ROTATION_MARGIN_DEG = 1.5
 _VIVE_MAX_COMMAND_DT_S = 0.05
 _ALLEGRO_UI_ALIGNED_HANDS = frozenset(("allegro_v5",))
+
+
+def _connect_capture_hand(**kwargs):
+    """Allow capture to continue without a hand that cannot connect."""
+    try:
+        return get_hand(**kwargs)
+    except OSError as exc:
+        logging.getLogger(__name__).warning(
+            "Failed to connect %s hand (%s, host=%s, interface=%s): %s. "
+            "Continuing capture with this hand disabled.",
+            kwargs["hand_side"],
+            kwargs["hand_name"],
+            kwargs.get("host", "default"),
+            kwargs.get("interface", "default"),
+            exc,
+        )
+        return None
 
 
 class _AllegroTeleopDiagnosticLogger:
@@ -347,6 +365,7 @@ class CaptureSession():
         camera_pc_list=None,
         timestamp=True,
         hand_scale=1.0,
+        inspire_retarget="manus",
         hand_command_rate_hz=None,
         allegro_teleop_diagnostic_path=None,
         use_vive=True,
@@ -361,11 +380,21 @@ class CaptureSession():
         human_tactile_plot_realtime=False,
         human_tactile_plot_refresh_interval=0.02,
         human_tactile_plot_max_samples=200,
+        inspire_thumb_bend_weight=0.7,
+        inspire_thumb_full_bend_deg=60.0,
+        allegro_retarget="direct",
     ):
         arm = _normalize_optional_name(arm)
         hand = _normalize_optional_name(hand)
         hand_left = _normalize_optional_name(hand_left)
         hand_right = _normalize_optional_name(hand_right)
+        if allegro_retarget not in ("direct", "dexpilot"):
+            raise ValueError("allegro_retarget must be direct or dexpilot")
+        if allegro_retarget == "dexpilot" and (
+            (hand_side == "left" and hand == "allegro_v5")
+            or (hand_side == "bimanual" and (hand_left or hand) == "allegro_v5")
+        ):
+            raise ValueError("Allegro V5 DexPilot currently supports the right hand only")
 
         if teleop == "vive" and hand_side not in ("right", "bimanual"):
             raise ValueError(
@@ -480,7 +509,7 @@ class CaptureSession():
             }
             if left_name is not None:
                 self.hand_name_left = left_name
-                self.hand_left = get_hand(
+                self.hand_left = _connect_capture_hand(
                     hand_name=left_name,
                     tactile=tactile,
                     ip=ip,
@@ -489,7 +518,7 @@ class CaptureSession():
                 )
             if right_name is not None:
                 self.hand_name_right = right_name
-                self.hand_right = get_hand(
+                self.hand_right = _connect_capture_hand(
                     hand_name=right_name,
                     tactile=tactile,
                     ip=ip,
@@ -499,7 +528,7 @@ class CaptureSession():
         else:
             if hand is not None:
                 self.hand_name = hand
-                self.hand = get_hand(
+                self.hand = _connect_capture_hand(
                     hand_name=hand,
                     tactile=tactile,
                     ip=ip,
@@ -537,6 +566,10 @@ class CaptureSession():
                     hand_name_left=self.hand_name_left,
                     hand_name_right=self.hand_name_right,
                     hand_scale=hand_scale,
+                    inspire_retarget=inspire_retarget,
+                    inspire_thumb_bend_weight=inspire_thumb_bend_weight,
+                    inspire_thumb_full_bend_deg=inspire_thumb_full_bend_deg,
+                    allegro_retarget=allegro_retarget,
                     teleop_name=teleop,
                 )
                 self.state_extractor = HandStateExtractor()
@@ -688,6 +721,9 @@ class CaptureSession():
         self.save_path = None
 
     def end(self):
+        retargetor = getattr(self, "retargetor", None)
+        if hasattr(retargetor, "close"):
+            retargetor.close()
         diagnostic_logger = getattr(self, "_allegro_teleop_diagnostic_logger", None)
         if diagnostic_logger is not None:
             try:
@@ -734,6 +770,7 @@ class CaptureSession():
         state_policy="gesture_control",
         loop_callback=None,
         bimanual_state_provider=None,
+        unimanual_state_provider=None,
     ):
         if self.teleop_device is None:
             raise ValueError("No teleop device initialized.")
@@ -741,6 +778,11 @@ class CaptureSession():
             raise ValueError(f"Unknown state_policy: {state_policy}")
         if bimanual_state_provider is not None and self.hand_side != "Bimanual":
             raise ValueError("bimanual_state_provider requires hand_side='bimanual'.")
+        if unimanual_state_provider is not None:
+            if self.hand_side == "Bimanual":
+                raise ValueError("unimanual_state_provider requires a single hand.")
+            if not callable(unimanual_state_provider):
+                raise ValueError("unimanual_state_provider must be callable.")
 
         if session_events is None:
             session_events = self.events
@@ -885,7 +927,18 @@ class CaptureSession():
 
             
             if self.hand_side != "Bimanual":
-                if data[self.hand_side] is None:
+                state = None
+                if unimanual_state_provider is not None:
+                    try:
+                        state = unimanual_state_provider()
+                    except Exception as exc:
+                        print(f"Unimanual state provider failed; pausing teleop: {exc}")
+                        state = 1
+                    if state not in (0, 1):
+                        raise ValueError(f"Unimanual state provider returned invalid state: {state}")
+                # A released/disconnected pedal must hold the hand even when
+                # tracking data has just disappeared.
+                if data[self.hand_side] is None and state != 1:
                     print("No data from teleop device...")
                     if session_events is not None:
                         if self.save_path is None and session_events["save"].is_set():
@@ -896,23 +949,23 @@ class CaptureSession():
                     time.sleep(0.01)
                     continue
 
-                if hasattr(self.teleop_device, "get_state"):
-                    state = self.teleop_device.get_state()
-                    if state is None:
-                        # Keyboard-controlled, Manus-only sessions have no
-                        # left-glove pause gesture.  Continue hand-only
-                        # teleoperation instead of waiting for that optional
-                        # control stream.
-                        if state_policy == "keyboard_control":
-                            state = 0
-                        else:
-                            time.sleep(0.01)
-                            continue
-                else:
-                    state = self.state_extractor.get_state(
-                        data[self.hand_side_opposite]
-                    )
-
+                if unimanual_state_provider is None:
+                    if hasattr(self.teleop_device, "get_state"):
+                        state = self.teleop_device.get_state()
+                        if state is None:
+                            # Keyboard-controlled, Manus-only sessions have no
+                            # left-glove pause gesture.  Continue hand-only
+                            # teleoperation instead of waiting for that optional
+                            # control stream.
+                            if state_policy == "keyboard_control":
+                                state = 0
+                            else:
+                                time.sleep(0.01)
+                                continue
+                    else:
+                        state = self.state_extractor.get_state(
+                            data[self.hand_side_opposite]
+                        )
                 if self.save_path is not None:
                     self.state_hist.append(state)
                     self.state_time.append(time.time())
@@ -926,7 +979,10 @@ class CaptureSession():
                         # deadman switch is re-pressed.  Tracker movement while
                         # released can therefore never become an arm jump.
                         if (
-                            getattr(self, "arm_command_enabled_provider", None) is not None
+                            (
+                                getattr(self, "arm_command_enabled_provider", None) is not None
+                                or unimanual_state_provider is not None
+                            )
                             and arm_deadman_was_enabled is not True
                             and self.arm is not None
                         ):

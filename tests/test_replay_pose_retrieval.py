@@ -4,6 +4,7 @@ from pathlib import Path
 
 import numpy as np
 import pytest
+from scipy.spatial.transform import Rotation
 
 from paradex.retargetor.experiment import replay_object_relative as core
 from paradex.retargetor.experiment import replay_pose_retrieval as retrieval
@@ -178,6 +179,95 @@ def test_object_pose_retrieval_combines_translation_and_rotation(tmp_path):
     assert [match.episode.root.name for match in ranked] == ["7", "6"]
     assert ranked[0].score == pytest.approx(0.4)
     assert ranked[1].score == pytest.approx(0.8)
+
+
+@pytest.mark.parametrize(
+    "axis",
+    (
+        np.array([0.0, 1.0, 0.0]),
+        np.array([0.128844, -0.039493, 0.990878]),
+        np.array([-0.241377, 0.511070, 0.824951]),
+    ),
+)
+def test_object_pose_retrieval_quotients_continuous_axis_rotation(tmp_path, axis):
+    source = np.eye(4)
+    current = np.eye(4)
+    angle = 1.1
+    axis = axis / np.linalg.norm(axis)
+    current[:3, :3] = Rotation.from_rotvec(axis * angle).as_matrix()
+
+    match = retrieval.rank_by_object_pose(
+        current,
+        [_episode(tmp_path, 6, source)],
+        translation_scale_m=0.05,
+        rotation_scale_rad=0.5,
+        continuous_symmetry_axis_object=axis,
+    )[0]
+
+    assert match.rotation_error_rad == pytest.approx(0.0, abs=1e-7)
+    assert match.symmetry_angle_rad == pytest.approx(-angle)
+    np.testing.assert_allclose(
+        match.aligned_current_object_robot,
+        source,
+        atol=1e-7,
+    )
+
+
+def test_continuous_axis_symmetry_preserves_off_axis_rotation_error(tmp_path):
+    source = np.eye(4)
+    current = np.eye(4)
+    angle = 0.4
+    current[:3, :3] = [
+        [1.0, 0.0, 0.0],
+        [0.0, np.cos(angle), -np.sin(angle)],
+        [0.0, np.sin(angle), np.cos(angle)],
+    ]
+
+    match = retrieval.rank_by_object_pose(
+        current,
+        [_episode(tmp_path, 6, source)],
+        translation_scale_m=0.05,
+        rotation_scale_rad=0.5,
+        continuous_symmetry_axis_object=np.array([0.0, 1.0, 0.0]),
+    )[0]
+
+    assert match.rotation_error_rad == pytest.approx(angle)
+
+
+def test_axis_flip_symmetry_recovers_upside_down_cylinder_pose(tmp_path):
+    source = np.eye(4)
+    current = np.eye(4)
+    axis = np.array([-0.241377, 0.511070, 0.824951])
+    axis = axis / np.linalg.norm(axis)
+    basis = np.eye(3)[int(np.argmin(np.abs(axis)))]
+    flip_axis = np.cross(axis, basis)
+    flip_axis = flip_axis / np.linalg.norm(flip_axis)
+    current[:3, :3] = Rotation.from_rotvec(flip_axis * np.pi).as_matrix()
+
+    without_flip = retrieval.rank_by_object_pose(
+        current,
+        [_episode(tmp_path, 6, source)],
+        translation_scale_m=0.05,
+        rotation_scale_rad=0.5,
+        continuous_symmetry_axis_object=axis,
+    )[0]
+    with_flip = retrieval.rank_by_object_pose(
+        current,
+        [_episode(tmp_path, 6, source)],
+        translation_scale_m=0.05,
+        rotation_scale_rad=0.5,
+        continuous_symmetry_axis_object=axis,
+        continuous_symmetry_allow_axis_flip=True,
+    )[0]
+
+    assert without_flip.rotation_error_rad == pytest.approx(np.pi)
+    assert with_flip.rotation_error_rad == pytest.approx(0.0, abs=1e-7)
+    assert with_flip.symmetry_flipped is True
+    np.testing.assert_allclose(
+        with_flip.aligned_current_object_robot,
+        source,
+        atol=1e-7,
+    )
 
 
 def test_naive_replay_uses_full_selected_episode_without_dish_annotations(

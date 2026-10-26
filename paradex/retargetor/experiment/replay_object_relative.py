@@ -320,14 +320,32 @@ def _load_episode_root(args: argparse.Namespace, root: Path) -> Episode:
         count = min(arm_poses.shape[0], arm_times.shape[0])
         arm_poses, arm_times = arm_poses[:count], arm_times[:count]
 
-    if args.robot != "allegro_v5":
-        raise ValueError("This replay preview/executor currently supports --robot allegro_v5 only")
     hand_dir = raw / "hand"
     command_path = hand_dir / "action.npy"
     command_time_path = hand_dir / "time.npy"
     if not command_path.exists():
-        raise FileNotFoundError(f"Allegro V5 action file not found: {command_path}")
-    hand_commands = _as_allegro_v5_actions(_load_array(command_path), label="Allegro V5 hand action")
+        raise FileNotFoundError(f"hand action file not found: {command_path}")
+    if args.robot == "allegro_v5":
+        hand_commands = _as_allegro_v5_actions(
+            _load_array(command_path), label="Allegro V5 hand action"
+        )
+    elif args.robot == "inspire_dftp":
+        hand_commands = np.asarray(_load_array(command_path), dtype=np.float64)
+        if (
+            hand_commands.ndim != 2
+            or hand_commands.shape[1] != 6
+            or not np.all(np.isfinite(hand_commands))
+        ):
+            raise ValueError(
+                "Inspire DFTP hand action must be a finite (N, 6) array, "
+                f"got {hand_commands.shape}"
+            )
+        if np.any(hand_commands < 0) or np.any(hand_commands > 1000):
+            raise ValueError(
+                "Inspire DFTP hand action contains commands outside 0..1000"
+            )
+    else:
+        raise ValueError(f"unsupported replay robot: {args.robot!r}")
     hand_times = _load_array(command_time_path).astype(np.float64)
 
     pose_path = _episode_source_pose_path(root, None)

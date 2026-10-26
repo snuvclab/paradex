@@ -1,0 +1,62 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Paradex · Timestamp Camera</title>
+<style>
+:root{color-scheme:dark;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;color:#e9edf4;background:#0c1017}*{box-sizing:border-box}body{margin:0}main{max-width:1320px;margin:auto;padding:36px 32px}header{display:flex;align-items:center;justify-content:space-between;gap:16px;margin-bottom:32px}.brand{font-size:14px;letter-spacing:3px;font-weight:750;color:#a3b3ca}.badge{font-size:12px;color:#9caec7;border:1px solid #2b3545;padding:8px 12px;border-radius:20px}h1{font-size:30px;letter-spacing:-1px;margin:8px 0 10px}.subtitle{color:#90a0b6;font-size:14px;margin:0 0 26px}.layout{display:grid;grid-template-columns:minmax(0,1fr) 286px;gap:22px}.viewer{background:#080b10;border:1px solid #253044;border-radius:16px;overflow:hidden}.toolbar{display:flex;justify-content:space-between;align-items:center;background:#141b26;padding:15px 20px;font-size:12px;color:#9daec5}.live{display:flex;align-items:center;gap:8px;color:#b6c2d2}.dot{width:7px;height:7px;border-radius:50%;background:#5b6779}.dot.on{background:#63e3b0;box-shadow:0 0 12px #63e3b070}.stage{aspect-ratio:4/3;display:flex;align-items:center;justify-content:center;position:relative}.stage img{width:100%;height:100%;object-fit:contain;position:absolute;inset:0}.placeholder{text-align:center;max-width:320px;padding:24px;color:#8293ac}.camera-icon{width:54px;height:40px;border:2px solid #39485d;border-radius:9px;margin:0 auto 24px;position:relative}.camera-icon:after{content:"";position:absolute;width:16px;height:16px;border:2px solid #39485d;border-radius:50%;left:16px;top:9px}.placeholder strong{display:block;color:#bdc9d9;font-weight:500;margin-bottom:12px}.placeholder p{font-size:13px;line-height:1.7;margin:0}.panel{border:1px solid #253044;border-radius:16px;padding:24px;background:#111823;align-self:start}.eyebrow{font-size:11px;letter-spacing:1.5px;color:#7f93af;font-weight:650}.serial{font-variant-numeric:tabular-nums;font-size:25px;margin:10px 0 6px;letter-spacing:1px}.caption{font-size:12px;color:#8c9db4;margin-bottom:26px}button{font:inherit;cursor:pointer;border:0;border-radius:9px;padding:13px 16px;font-size:13px;font-weight:650;transition:background .15s}button:disabled{opacity:.4;cursor:default}.start{background:#a9f0cf;color:#0c3326;width:100%;margin-bottom:10px}.start:hover:enabled{background:#c8f8e3}.stop{background:#243042;color:#c7d4e8;width:100%}.stats{margin:28px 0 0;border-top:1px solid #293347;padding-top:8px}.stat{display:flex;justify-content:space-between;gap:12px;font-size:12px;margin-top:18px}.stat span{color:#899bb4}.stat b{font-weight:500;text-align:right;font-variant-numeric:tabular-nums}.timestamp{margin-top:24px;padding-top:20px;border-top:1px solid #293347}.timestamp time{display:block;font-family:ui-monospace,SFMono-Regular,monospace;font-size:15px;margin-top:10px}.tiny{font-size:11px;line-height:1.7;color:#7c90ac;overflow-wrap:anywhere}.note{font-size:12px;line-height:1.8;color:#8295b0;margin-top:22px}.message{margin-top:18px;padding:14px 18px;border:1px solid #344052;border-radius:10px;color:#9aacc5;font-size:13px;line-height:1.6;overflow-wrap:anywhere}.message.error{color:#ffc0b8;border-color:#6e3938;background:#261918}.fullscreen{background:transparent;padding:0;font-size:12px;color:#9daec5;font-weight:400}footer{margin-top:24px;color:#637590;font-size:11px}a{color:#acd9c7}[hidden]{display:none!important}@media(max-width:850px){main{padding:24px 16px}.layout{grid-template-columns:1fr}.panel{padding:20px}.stage{min-height:240px}h1{font-size:26px}.badge{font-size:10px}}
+</style>
+</head>
+<body><main>
+<header><div class="brand">PARADEX <span style="color:#4c5e78">/</span> CAMERA</div><div class="badge" id="connection">연결 확인 중</div></header>
+<div class="eyebrow">MAINPC · LIVE PREVIEW</div><h1>Timestamp Camera</h1>
+<p class="subtitle">필요할 때 시작하고, 확인이 끝나면 카메라를 해제하세요.</p>
+<div class="layout">
+<section class="viewer" aria-label="카메라 미리보기">
+<div class="toolbar"><span class="live"><span class="dot" id="dot"></span><span id="state">대기 중</span></span><button class="fullscreen" id="fullscreen">전체 화면 ↗</button></div>
+<div class="stage" id="stage"><img id="video" alt="22684253 카메라 실시간 영상" hidden><div class="placeholder" id="placeholder"><div class="camera-icon"></div><strong id="placeholder-title">카메라가 대기 중입니다</strong><p id="placeholder-text">스트리밍 시작을 누르면<br>이곳에 실시간 영상이 표시됩니다.</p></div></div>
+</section>
+<aside class="panel"><div class="eyebrow">TIMESTAMP CAMERA</div><div class="serial">22684253</div><div class="caption">mainpc · Blackfly GigE</div>
+<button class="start" id="start" disabled>▶ 스트리밍 시작</button><button class="stop" id="stop" disabled>■ 중지 · 카메라 해제</button>
+<div class="stats"><div class="stat"><span>수신 속도</span><b id="fps">—</b></div><div class="stat"><span>영상 크기</span><b id="resolution">—</b></div><div class="stat"><span>프레임 ID</span><b id="frame">—</b></div><div class="stat"><span>마지막 프레임</span><b id="age">—</b></div></div>
+<div class="timestamp"><div class="eyebrow">MAINPC 수신 시각</div><time id="time">—</time><div class="tiny" id="date">—</div><div class="tiny" id="camera-time" style="margin-top:12px">Camera timestamp: —</div></div>
+<p class="note">미리보기는 영상을 저장하지 않습니다. 중지하면 원래 카메라 설정을 복원합니다. Timestamp 수집을 실행하기 전에 미리보기를 중지하세요.</p>
+</aside></div>
+<div class="message" id="message" role="status" aria-live="polite">카메라는 시작 버튼을 누를 때만 연결됩니다.</div>
+<footer>브라우저 연결이 약 15초 동안 끊기면 자동으로 카메라를 해제합니다.</footer>
+</main>
+<script>
+const token='__CONTROL_TOKEN__';
+const el=id=>document.getElementById(id);
+let busy=false,attached=false,lastFrames=0,lastAt=0,failedImage=false;
+async function api(path,method='GET'){
+ const controller=new AbortController();const timeout=setTimeout(()=>controller.abort(),12000);
+ try {const response=await fetch(path,{method,headers:method==='POST'?{'X-Preview-Token':token}:{},cache:'no-store',signal:controller.signal});const data=await response.json();if(!response.ok)throw Error(data.error||response.statusText);return data;} finally {clearTimeout(timeout);}
+}
+function message(text,error=false){el('message').textContent=text;el('message').classList.toggle('error',error);}
+function render(s){
+ const running=s.state==='running',active=['starting','running','stopping'].includes(s.state);
+ el('connection').textContent='● mainpc 연결됨';
+ el('state').textContent=({stopped:'대기 중',starting:'카메라 연결 중',running:'LIVE',stopping:'카메라 해제 중',error:'연결 오류'})[s.state]||s.state;
+ el('dot').classList.toggle('on',running);
+ el('start').disabled=busy||active;el('stop').disabled=busy||!['starting','running'].includes(s.state);
+ if(running){
+  el('placeholder').hidden=true;el('video').hidden=false;
+  if(!attached||failedImage){el('video').src='/stream.mjpg?t='+Date.now();attached=true;failedImage=false;}
+ }else{el('video').hidden=true;el('placeholder').hidden=false;if(attached){el('video').removeAttribute('src');attached=false;}
+  el('placeholder-title').textContent=s.state==='starting'?'카메라에 연결하고 있습니다':s.state==='stopping'?'카메라를 해제하고 있습니다':s.state==='error'?'카메라를 연결할 수 없습니다':'카메라가 대기 중입니다';
+  el('placeholder-text').textContent=s.state==='error'?'아래 오류를 확인한 뒤 다시 시작하세요.':active?'잠시 기다려 주세요.':'스트리밍 시작을 누르면 실시간 영상이 표시됩니다.';
+ }
+ el('frame').textContent=s.frame_id??'—';el('resolution').textContent=s.width?`${s.width} × ${s.height}`:'—';
+ el('age').textContent=s.frame_age_seconds!=null?`${Math.max(0,s.frame_age_seconds).toFixed(1)}초 전`:'—';
+ const now=performance.now();if(lastAt&&running&&s.frames>=lastFrames){el('fps').textContent=((s.frames-lastFrames)*1000/(now-lastAt)).toFixed(1)+' fps';}else{el('fps').textContent='—';}lastFrames=s.frames;lastAt=now;
+ if(s.received_at){const d=new Date(s.received_at*1000);el('time').textContent=d.toLocaleTimeString('ko-KR',{hour12:false})+'.'+String(d.getMilliseconds()).padStart(3,'0');el('date').textContent=d.toLocaleDateString('ko-KR')+' · '+Intl.DateTimeFormat().resolvedOptions().timeZone;el('camera-time').textContent='Camera timestamp: '+s.camera_timestamp_ns+' ns';}
+ if(s.error)message(s.error,true);else if(s.stop_reason)message(s.stop_reason);else message(running?'실시간 미리보기 중입니다. 중지를 누르면 카메라를 해제합니다.':s.state==='starting'?'카메라를 연결하고 첫 프레임을 기다리고 있습니다.':'카메라는 시작 버튼을 누를 때만 연결됩니다.');
+}
+async function action(path){busy=true;el('start').disabled=el('stop').disabled=true;try{render(await api(path,'POST'));}catch(e){message(e.message,true);}finally{busy=false;}}
+el('start').onclick=()=>action('/api/start');el('stop').onclick=()=>action('/api/stop');
+el('video').onerror=()=>{failedImage=true;};
+el('fullscreen').onclick=()=>{if(document.fullscreenElement)document.exitFullscreen();else el('stage').requestFullscreen?.();};
+async function poll(){try{let s=await api('/api/status');if(['starting','running'].includes(s.state))s=await api('/api/heartbeat','POST');render(s);}catch(e){el('connection').textContent='mainpc 연결 끊김';el('dot').classList.remove('on');el('start').disabled=el('stop').disabled=true;el('video').hidden=true;el('placeholder').hidden=false;el('placeholder-title').textContent='mainpc 연결이 끊겼습니다';el('placeholder-text').textContent='SSH 터널이 실행 중인지 확인하세요.';message('mainpc에 연결할 수 없습니다. 연결을 다시 확인하고 있습니다.',true);if(attached){el('video').removeAttribute('src');attached=false;}}finally{setTimeout(poll,1000);}}
+poll();
+</script></body></html>

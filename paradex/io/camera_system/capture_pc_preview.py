@@ -46,8 +46,12 @@ class CapturePcPreviewGui:
         cv2_module=cv2,
         side_panel_provider: Optional[Callable[[int, int], Optional[np.ndarray]]] = None,
         side_panel_refresh_interval: float = 1.0 / 30.0,
+        camera_names: Optional[Iterable[str]] = None,
     ) -> None:
         self.pc_list = list(pc_list)
+        self.camera_names = (
+            None if camera_names is None else frozenset(str(name) for name in camera_names)
+        )
         self.port = int(port)
         self.refresh_interval = float(refresh_interval)
         if self.refresh_interval <= 0.0:
@@ -157,6 +161,11 @@ class CapturePcPreviewGui:
         updated_images = {}
         for pc_name, reader in list(self._readers.items()):
             for camera_name in reader.camera_names:
+                if (
+                    self.camera_names is not None
+                    and str(camera_name) not in self.camera_names
+                ):
+                    continue
                 display_name = f"{pc_name}:{camera_name}"
                 try:
                     image = reader.get_preview(camera_name)
@@ -268,6 +277,18 @@ class CapturePcPreviewGui:
                     self._refresh_composite()
             self._stop_event.wait(self.side_panel_refresh_interval)
 
+    def _compose_camera_grid(self, images, frame_text) -> np.ndarray:
+        single_camera = self.camera_names is not None
+        return merge_image(
+            images,
+            frame_text,
+            grid_cols=1 if single_camera else 4,
+            preserve_aspect=True,
+            # Keep a single-camera window usable alongside other applications.
+            # The full grid retains its previous total height.
+            target_height=900 if single_camera else 1230,
+        )
+
     def _run(self) -> None:
         try:
             while not self._stop_event.is_set():
@@ -275,15 +296,7 @@ class CapturePcPreviewGui:
                 self._connect_readers()
                 images, frame_text = self._collect_frames()
                 display = (
-                    merge_image(
-                        images,
-                        frame_text,
-                        grid_cols=4,
-                        preserve_aspect=True,
-                        # Match the previous 5x4 preview's total height:
-                        # 1200px image area + three 10px row gaps.
-                        target_height=1230,
-                    )
+                    self._compose_camera_grid(images, frame_text)
                     if images
                     else self._status_image()
                 )

@@ -1,0 +1,238 @@
+<?xml version='1.0' encoding='utf-8'?>
+<robot name="allegro_hand_right">
+  
+  
+  
+  
+  
+  
+  
+ <!-- Kinematics from allegro_hand_ros2_v5 right TYPE B; source SHA256: 645a7b461336e889eafe82e772e3fa88064a225922adaab18695ef2a01915f10. Visual/collision/inertial tags omitted for optimization. --><link name="world" />
+  <joint name="global" type="fixed">
+        <parent link="world" />
+        <child link="palm_link" />
+        
+        <origin xyz="0 0 0.0" rpy="0 0 0" />
+  </joint>
+  <link name="palm_link">
+    </link>
+  
+  
+  
+  
+  
+  <link name="link_0_0">
+    </link>
+  <joint name="joint_0_0" type="revolute">
+    <axis xyz="0 0 1" />
+    <limit effort="15" lower="-0.3" upper="0.3" velocity="7" />
+    <parent link="palm_link" />
+    <child link="link_0_0" />
+    <origin rpy="-0.08726646255 0 0" xyz="0.0005 0.0425 -0.005" />
+    <dynamics damping="3" friction="10" />
+  </joint>
+  
+  <link name="link_1_0">
+    </link>
+  <joint name="joint_1_0" type="revolute">
+    <limit effort="15" lower="-0.01" upper="1.6" velocity="7" />
+    <axis xyz="0 1 0" />
+    <parent link="link_0_0" />
+    <child link="link_1_0" />
+    <origin xyz="0 -0.000 0.017" />
+    <dynamics damping="3" friction="5" />
+  </joint>
+  
+  <link name="link_2_0">
+    </link>
+  <joint name="joint_2_0" type="revolute">
+    <axis xyz="0 1 0" />
+    <limit effort="15" lower="-0.07" upper="1.86" velocity="7" />
+    <parent link="link_1_0" />
+    <child link="link_2_0" />
+    <origin xyz="0 -0.000 0.0431" />
+    <dynamics damping="8" friction="10" />
+  </joint>
+  
+  <link name="link_3_0">
+    </link>
+  <joint name="joint_3_0" type="revolute">
+    <axis xyz="0 1 0" />
+    <limit effort="15" lower="-0.02" upper="2.01" velocity="7" />
+    <parent link="link_2_0" />
+    <child link="link_3_0" />
+    <origin xyz="0 0 0.038" />
+    <dynamics damping="10" friction="12" />
+  </joint>
+  
+  <link name="link_3_0_tip">
+    </link>
+  <joint name="joint_3_0_tip" type="fixed">
+    <parent link="link_3_0" />
+    <child link="link_3_0_tip" />
+    <origin rpy="0 0 0" xyz="0 0 0.04" />
+  </joint>
+  
+  <link name="link_4_0">
+     </link>
+  <joint name="joint_4_0" type="revolute">
+    <axis xyz="0 0 1" />
+    <limit effort="15" lower="-0.26" upper="0.26" velocity="7" />
+    <parent link="palm_link" />
+    <child link="link_4_0" />
+    <origin rpy="0.0 0 0" xyz="0 0 -0.002" />
+    <dynamics damping="3" friction="10" />
+  </joint>
+  
+  <link name="link_5_0">
+    </link>
+  <joint name="joint_5_0" type="revolute">
+    <limit effort="15" lower="-0.21" upper="1.79" velocity="7" />
+    <axis xyz="0 1 0" />
+    <parent link="link_4_0" />
+    <child link="link_5_0" />
+    <origin xyz="0 0 0.017" />
+    <dynamics damping="3" friction="5" />
+  </joint>
+  
+  <link name="link_6_0">
+   </link>
+  <joint name="joint_6_0" type="revolute">
+    <axis xyz="0 1 0" />
+    <limit effort="15" lower="-0.12" upper="1.86" velocity="7" />
+    <parent link="link_5_0" />
+    <child link="link_6_0" />
+    <origin xyz="0 0 0.0431" />
+    <dynamics damping="8" friction="10" />
+  </joint>
+  
+  <link name="link_7_0">
+    </link>
+  <joint name="joint_7_0" type="revolute">
+    <axis xyz="0 1 0" />
+    <limit effort="15" lower="-0.21" upper="1.85" velocity="7" />
+    <parent link="link_6_0" />
+    <child link="link_7_0" />
+    <origin xyz="0 0 0.038" />
+    <dynamics damping="10" friction="12" />
+  </joint>
+  
+  <link name="link_7_0_tip">
+    </link>
+  <joint name="joint_7_0_tip" type="fixed">
+    <parent link="link_7_0" />
+    <child link="link_7_0_tip" />
+    <origin rpy="0 0 0" xyz="0 0 0.04" />
+  </joint>
+  
+    <link name="link_8_0">
+       </link>
+  <joint name="joint_8_0" type="revolute">
+    <axis xyz="0 0 1" />
+    <limit effort="15" lower="-0.26" upper="0.29" velocity="7" />
+    <parent link="palm_link" />
+    <child link="link_8_0" />
+    <origin rpy="0.08726646255 0 0" xyz="0.0005 -0.0425 -0.005" />
+    <dynamics damping="3" friction="10" />
+  </joint>
+  
+  <link name="link_9_0">
+    </link>
+  <joint name="joint_9_0" type="revolute">
+    <limit effort="15" lower="-0.21" upper="1.79" velocity="7" />
+    <axis xyz="0 1 0" />
+    <parent link="link_8_0" />
+    <child link="link_9_0" />
+    <origin xyz="0 0 0.017" />
+    <dynamics damping="3" friction="5" />
+  </joint>
+  
+  <link name="link_10_0">
+    </link>
+  <joint name="joint_10_0" type="revolute">
+    <axis xyz="0 1 0" />
+    <limit effort="15" lower="-0.12" upper="1.86" velocity="7" />
+    <parent link="link_9_0" />
+    <child link="link_10_0" />
+    <origin xyz="0 0 0.0431" />
+    <dynamics damping="8" friction="10" />
+  </joint>
+  
+  <link name="link_11_0">
+    </link>
+  <joint name="joint_11_0" type="revolute">
+    <axis xyz="0 1 0" />
+    <limit effort="15" lower="-0.21" upper="1.85" velocity="7" />
+    <parent link="link_10_0" />
+    <child link="link_11_0" />
+    <origin xyz="0 0 0.038" />
+    <dynamics damping="10" friction="12" />
+  </joint>
+  
+  <link name="link_11_0_tip">
+    </link>
+  <joint name="joint_11_0_tip" type="fixed">
+    <parent link="link_11_0" />
+    <child link="link_11_0_tip" />
+    <origin rpy="0 0 0" xyz="0 0 0.04" />
+  </joint>
+  
+  
+  <link name="link_12_0">
+    </link>
+  <joint name="joint_12_0" type="revolute">
+    <axis xyz="-1 0 0" />
+    <limit effort="15" lower="0.00" upper="1.78" velocity="7" />
+    <parent link="palm_link" />
+    <child link="link_12_0" />
+    <origin rpy="0 -1.65806278845 -1.5707963259" xyz="0.002 0.027 -0.06342" />
+    <dynamics damping="3" friction="10" />
+  </joint>
+  
+  <link name="link_13_0">
+    </link>
+  <joint name="joint_13_0" type="revolute">
+    <axis xyz="0 0 1" />
+       <limit effort="15" lower="-0.26" upper="1.65" velocity="7" />
+    <parent link="link_12_0" />
+    <child link="link_13_0" />
+    <origin xyz="-0.001 0.00 0.06874" />
+    <dynamics damping="3" friction="5" />
+  </joint>
+  
+  <link name="link_14_0">
+    </link>
+  <joint name="joint_14_0" type="revolute">
+    <axis xyz="0 1 0" />
+    
+           <limit effort="15" lower="-0.05" upper="1.85" velocity="7" />
+    <parent link="link_13_0" />
+    <child link="link_14_0" />
+    <origin xyz="0 0 0.00" />
+    <dynamics damping="3" friction="10" />
+  </joint>
+  
+  <link name="link_15_0">
+    </link>
+  <joint name="joint_15_0" type="revolute">
+    <axis xyz="0 1 0" />
+    <limit effort="15" lower="-0.09" upper="1.80" velocity="7" />
+    <parent link="link_14_0" />
+    <child link="link_15_0" />
+    <origin xyz="0 0 0.038" />
+    <dynamics damping="3" friction="12" />
+  </joint>
+  
+  <link name="link_15_0_tip">
+    </link>
+  <joint name="joint_15_0_tip" type="fixed">
+    <parent link="link_15_0" />
+    <child link="link_15_0_tip" />
+    <origin rpy="0 0 0" xyz="0 0 0.05" />
+  </joint>
+  
+  
+  
+  
+  
+</robot>
