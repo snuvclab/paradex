@@ -103,6 +103,59 @@ def test_allegro_v5_feedback_hold_target_requires_live_feedback():
     assert capture_module._allegro_v5_feedback_hold_target({}) is None
 
 
+def test_missing_allegro_feedback_is_reported_until_commands_can_resume(monkeypatch, capsys):
+    monkeypatch.setattr(capture_module.chime, "warning", lambda **_kwargs: None)
+    monkeypatch.setattr(capture_module.chime, "success", lambda **_kwargs: None)
+    monkeypatch.setattr(capture_module.time, "sleep", lambda _seconds: None)
+    events = make_events()
+
+    class Device:
+        tick = 0
+
+        def get_data(self):
+            self.tick += 1
+            if self.tick == 4:
+                events["exit"].set()
+            return {"Right": {"wrist": np.eye(4)}, "Left": None}
+
+        def get_state(self):
+            return None
+
+    device = Device()
+
+    class FeedbackHand(FakeHand):
+        state_topic = "/right/allegroHand_0/joint_states"
+
+        def get_data(self):
+            return {
+                "is_connected": device.tick >= 3,
+                "qpos": np.zeros(16),
+                "joint_names": capture_module.ALLEGRO_V5_DRIVER_JOINT_NAMES,
+            }
+
+    class Retargetor:
+        def start(self, _home_pose):
+            pass
+
+        def get_action(self, _data):
+            return np.eye(4), np.zeros(16)
+
+    session = capture_module.CaptureSession.__new__(capture_module.CaptureSession)
+    session.teleop_device = device
+    session.hand_side = "Right"
+    session.arm = None
+    session.hand = FeedbackHand()
+    session.hand_name = "allegro_v5"
+    session.retargetor = Retargetor()
+    session.save_path = None
+
+    assert session.teleop(session_events=events, state_policy="keyboard_control") == "exit"
+    assert len(session.hand.moves) == 2
+    output = capsys.readouterr().out
+    assert output.count("Waiting for allegro_v5 feedback") == 1
+    assert "/right/allegroHand_0/joint_states" in output
+
+
 def test_ui_aligned_allegro_pause_holds_current_feedback_not_prior_manus_target(
     monkeypatch,
 ):
@@ -388,8 +441,10 @@ def test_capture_session_routes_vive_bimanual_mode_to_receiver(monkeypatch):
 
     assert receiver_kwargs == {
         "hand_side": "bimanual",
-        "require_left_control": True,
+        "require_left_control": False,
         "use_vive": True,
+        "use_manus": False,
+        "callback_mode": "split",
     }
     assert session.arm_left is not None
     assert session.arm_right is not None
@@ -424,10 +479,12 @@ def test_capture_session_routes_manus_only_hand_teleop_without_an_arm(monkeypatc
         "hand_side": "right",
         "require_left_control": False,
         "use_vive": False,
+        "callback_mode": "split",
     }
 
 
-def test_keyboard_hand_only_teleop_does_not_wait_for_optional_left_glove(monkeypatch):
+@pytest.mark.parametrize("side", ["Right", "Left"])
+def test_keyboard_hand_only_teleop_does_not_wait_for_opposite_glove(monkeypatch, side):
     monkeypatch.setattr(capture_module.chime, "warning", lambda **_kwargs: None)
     monkeypatch.setattr(capture_module.chime, "success", lambda **_kwargs: None)
 
@@ -436,7 +493,10 @@ def test_keyboard_hand_only_teleop_does_not_wait_for_optional_left_glove(monkeyp
     class ManusOnlyDevice:
         def get_data(self):
             events["exit"].set()
-            return {"Left": None, "Right": object()}
+            return {
+                "Left": object() if side == "Left" else None,
+                "Right": object() if side == "Right" else None,
+            }
 
         def get_state(self):
             return None
@@ -450,7 +510,7 @@ def test_keyboard_hand_only_teleop_does_not_wait_for_optional_left_glove(monkeyp
 
     session = capture_module.CaptureSession.__new__(capture_module.CaptureSession)
     session.teleop_device = ManusOnlyDevice()
-    session.hand_side = "Right"
+    session.hand_side = side
     session.arm = None
     session.hand = FakeHand()
     session.retargetor = HandOnlyRetargetor()
@@ -780,7 +840,7 @@ def test_bimanual_inspire_retargetor_uses_manus_ergonomics():
     np.testing.assert_allclose(actions[3], actions[2])
 
 
-def test_bimanual_inspire_locks_thumb_four_when_both_thumb_five_are_high():
+def test_bimanual_inspire_preserves_left_thumb_bend_when_rotation_command_is_high():
     ergonomics = {}
     for finger in ("Pinky", "Ring", "Middle", "Index"):
         for joint in ("MCP", "PIP", "DIP"):
@@ -806,11 +866,12 @@ def test_bimanual_inspire_locks_thumb_four_when_both_thumb_five_are_high():
 
     assert actions[2][5] == pytest.approx(1000.0)
     assert actions[3][5] == pytest.approx(1000.0)
-    assert actions[2][4] == pytest.approx(1000.0)
+    assert actions[2][4] == pytest.approx(0.0)
+    # Keep the established right-hand policy while fixing the left hand.
     assert actions[3][4] == pytest.approx(1000.0)
 
 
-def test_bimanual_inspire_locks_thumb_four_independently_per_hand():
+def test_bimanual_inspire_keeps_thumb_axes_independent_per_hand():
     low = {}
     for finger in ("Pinky", "Ring", "Middle", "Index"):
         for joint in ("MCP", "PIP", "DIP"):
@@ -838,18 +899,97 @@ def test_bimanual_inspire_locks_thumb_four_independently_per_hand():
 
     assert actions[2][5] == pytest.approx(1000.0)
     assert actions[3][5] == pytest.approx(0.0)
-    assert actions[2][4] == pytest.approx(1000.0)
+    assert actions[2][4] == pytest.approx(0.0)
     assert actions[3][4] == pytest.approx(0.0)
 
 
-def test_capture_session_rejects_vive_left_only_mode():
-    with pytest.raises(ValueError, match="right or bimanual"):
+@pytest.mark.parametrize('stretch_deg', [33.7, 33.75, 33.8, 45.0])
+def test_mixed_bimanual_left_inspire_thumb_matches_unimanual_across_old_lock_threshold(stretch_deg):
+    ergonomics = {
+        f'{finger}{joint}Stretch': 0.0
+        for finger in ('Pinky', 'Ring', 'Middle', 'Index')
+        for joint in ('MCP', 'PIP', 'DIP')
+    }
+    ergonomics.update(ThumbMCPStretch=stretch_deg, ThumbMCPSpread=18.75)
+    expected = inspire_from_manus_ergonomics(ergonomics)
+    assert expected[4] == pytest.approx(350.0)
+
+    mixed = Retargetor(
+        arm_name='xarm',
+        hand_side='Bimanual',
+        hand_name_left='inspire',
+        hand_name_right='allegro_v5',
+    )
+    # Isolate the Inspire path while checking that the other hand is preserved.
+    allegro_action = np.arange(16, dtype=float) / 10.0
+    mixed.hand_retargetor['Right'] = lambda _frame, **_kwargs: allegro_action.copy()
+    mixed.start({'Left': np.eye(4), 'Right': np.eye(4)})
+    data = {
+        'Left': {'wrist': np.eye(4)},
+        'Right': {'wrist': np.eye(4)},
+        'ergonomics': {'Left': ergonomics},
+    }
+    actions = mixed.get_action(data)
+
+    single = Retargetor(arm_name='xarm', hand_name='inspire', hand_side='Left')
+    single.start(np.eye(4))
+    _, single_action = single.get_action(data)
+    np.testing.assert_allclose(actions[2], expected)
+    np.testing.assert_allclose(actions[2], single_action)
+    np.testing.assert_allclose(actions[3], allegro_action)
+
+
+@pytest.mark.parametrize("arm", [None, "xarm"])
+@pytest.mark.parametrize("hand", ["inspire", "inspire_dftp"])
+def test_capture_session_accepts_left_only_manus_mode(monkeypatch, arm, hand):
+    receiver_kwargs = {}
+    arm_kwargs = {}
+    hand_kwargs = {}
+
+    class FakeViveReceiver:
+        def __init__(self, **kwargs):
+            receiver_kwargs.update(kwargs)
+
+    def fake_arm(_name, **kwargs):
+        arm_kwargs.update(kwargs)
+        return FakeArm()
+
+    def fake_hand(**kwargs):
+        hand_kwargs.update(kwargs)
+        return FakeHand()
+
+    monkeypatch.setattr(capture_module, "get_arm", fake_arm)
+    monkeypatch.setattr(capture_module, "get_hand", fake_hand)
+    monkeypatch.setattr(vive_receiver_module, "ViveManusROSReceiver", FakeViveReceiver)
+
+    session = capture_module.CaptureSession(
+        camera=False, arm=arm, hand=hand, teleop="vive",
+        hand_side="left", use_vive=False, ip=True,
+        hand_kwargs={"host": "192.168.11.210", "interface": "enp8s0f1"},
+    )
+
+    assert session.hand_side == "Left"
+    assert receiver_kwargs == {
+        "hand_side": "left", "require_left_control": False, "use_vive": False,
+        "callback_mode": "split",
+    }
+    if arm is not None:
+        assert arm_kwargs["namespace"] == "left"
+    else:
+        assert session.arm is None
+        assert arm_kwargs == {}
+    assert hand_kwargs["hand_side"] == "left"
+    assert hand_kwargs["interface"] == "enp8s0f1"
+    np.testing.assert_array_equal(
+        session.retargetor.device2wrist,
+        DEVICE2WRIST["xarm_vive_Left"] if arm is not None else DEVICE2WRIST[hand],
+    )
+
+
+def test_capture_session_explains_no_vive_for_left_only_mode():
+    with pytest.raises(ValueError, match="Use --no-vive"):
         capture_module.CaptureSession(
-            camera=False,
-            arm="xarm",
-            hand=None,
-            teleop="vive",
-            hand_side="left",
+            arm="xarm", teleop="vive", hand_side="left", use_vive=True,
         )
 
 

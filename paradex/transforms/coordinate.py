@@ -71,6 +71,9 @@ DEVICE2WRIST = {
                               [0, 0, 0, 1]]),
 }
 
+# RH56DFTP uses the same wrist mounting convention as the Inspire controller.
+DEVICE2WRIST["inspire_dftp"] = DEVICE2WRIST["inspire"].copy()
+
 # T ^ {Global : predefined global coordinate} _ {Device coordinate}
 DEVICE2GLOBAL = {
     "xarm":np.array([[-1, 0, 0, 0], 

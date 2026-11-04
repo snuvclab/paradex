@@ -27,11 +27,17 @@ class TimestampMonitor():
 
         self.last_error = None
         self.last_traceback = None
+        self._connection_error = None
         
         self.capture_thread = Thread(target=self.run) 
         self.capture_thread.start()  
         
         self.event["connection"].wait()
+        if self._connection_error is not None:
+            self.capture_thread.join()
+            raise RuntimeError(
+                f"Failed to connect timestamp camera {self.name}: {self._connection_error}"
+            ) from self._connection_error
 
     def start(self, save_path=None):
         if self.event["start"].is_set():
@@ -166,7 +172,6 @@ class TimestampMonitor():
             raise NotImplementedError(f"Camera type {self.type} is not implemented.")
         
         self.camera = load_timestamp_monitor(self.name)
-        self.event["connection"].set()
     
     def release(self):
         self.camera.release()
@@ -193,7 +198,17 @@ class TimestampMonitor():
                 return
                 
     def run(self):
-        self.connect_camera()
+        try:
+            self.connect_camera()
+        except Exception as exc:
+            self._connection_error = exc
+            self.last_error = str(exc)
+            self.last_traceback = traceback.format_exc()
+            self.event["error"].set()
+            return
+        finally:
+            # Always release the constructor, including when discovery/open fails.
+            self.event["connection"].set()
         
         while not self.event["exit"].is_set(): # we should maintain the connection until exit
             if self.event["start"].is_set(): # Start data acquisition

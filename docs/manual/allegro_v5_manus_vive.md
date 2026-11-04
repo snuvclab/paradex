@@ -14,6 +14,18 @@ VIVE는 기존 `ViveManusROSReceiver`에서 손목 자세에 합성되고 xArm�
 
 Allegro 드라이버를 기존 장비 절차대로 먼저 실행하고
 `/right/allegroHand_0/joint_states`에 실제 메시지가 나오는지 확인한다.
+현재 PC에서는 별도 터미널에서 다음 실행기를 사용할 수 있다.
+
+```bash
+~/.local/bin/start-allegro-ros
+```
+
+이 실행기는 `HAND:=right TYPE:=B NAMESPACE:=right`로 드라이버를 시작한다.
+`capture_robot.py`는 드라이버를 자동 실행하지 않는다. MANUS 수신 시작 로그만
+나오는 경우에도 Allegro 연결이 완료됐다는 뜻은 아니다. 관절 피드백이 없으면
+`Waiting for allegro_v5 feedback on /right/allegroHand_0/joint_states`를 출력하고
+피드백이 들어올 때까지 손 명령을 보류한다.
+
 mainpc의 서로 다른 터미널에서 입력 발행기를 실행한다.
 
 ```bash
@@ -59,8 +71,22 @@ python -m src.dataset_acquisition.hri.capture_robot \
 텔레옵은 동작한다. 카메라 기록은 `--no-camera`를 제거하면 기존 경로를 사용한다.
 
 손만 움직이려면 `--arm none`으로 실행한다. VIVE도 제외하려면 추가로 `--no-vive`를 준다.
+오른손 MANUS만으로 손을 제어하는 명령은 다음과 같다. 왼손 장갑 및 제어 제스처는
+요구하지 않으며, `c`/`s`는 녹화만 시작/중지한다. `--pedal`을 추가하면 중앙 페달을
+누르는 동안만 손이 움직인다.
+
+```bash
+python src/dataset_acquisition/hri/capture_robot.py \
+  --name allegro_hand_only --hand-side right --hand allegro_v5 \
+  --no-camera --arm none --no-vive
+```
+
 `--scale`은 손 크기 비율이다. 기본 1.15에서 손끝 도달 거리에 맞게 조정한다.
 `--allegro-command-rate-hz`의 기본값은 30 Hz이다.
+`--allegro-command-rate-hz 0`이면 capture의 목표 갱신 제한을 해제하여 매 teleop
+루프에서 최신 목표를 전달한다. Allegro ROS 명령 발행 주기(100 Hz)는 바뀌지 않는다.
+양손 모드에서는 함께 전달하는 왼손 목표의 갱신 제한도 해제된다. 이 옵션은
+매핑을 되돌리거나 실제 센서/통신/모터 지연을 제거하지 않으며, 기존 기본 동작은 유지한다.
 `--allegro-teleop-log`는 기존 진단 NPZ 기록을 활성화한다.
 기존 직접 각도 매핑은 `--allegro-retarget direct`로 선택하며 이것이 기본값이다.
 
@@ -140,3 +166,49 @@ python -m src.dataset_acquisition.hri.capture_robot \
 mainpc에서 USB 0fd9:0086 Elgato Stream Deck Pedal 1대, 펌웨어 2.0.4.0,
 장치 열기/접근 권한 및 중앙 스위치 눌림·해제 3회를 확인했다.
 관련 테스트 130개 통과. 입력 모니터링과 모의 제어 검증을 수행했고 로봇 명령은 발행하지 않았다.
+
+### August 18 mapping comparison
+
+Use `--allegro-retarget legacy-0818` to select the final August 18, 2026
+Allegro V5 mapping (`fe18720cf`). The frozen module preserves that commit's
+MANUS ergonomic mapping, transform-only fallback, thumb signs/gains and raw
+output. In particular it does not apply the October 26 thumb opposition
+remapping or physical clipping inside the retargeter. Existing controller
+behavior, feedback readiness, command rate limits, arm mapping, camera startup
+and split input/control loops still apply; this is a retargeter comparison,
+not a checkout of the entire historical capture stack.
+
+This selection replaces only `allegro_v5` retargeters. An Inspire hand in a
+mixed bimanual session keeps its configured mapping. It also works with
+`--no-vive`. The default remains `--allegro-retarget direct`; `dexpilot` stays
+available separately. The implementation and numeric fixtures are frozen
+from Git so runtime execution does not require Git history.
+
+```bash
+python src/dataset_acquisition/hri/capture_robot.py \
+  --name 1102_legacy0818 --hand-side bimanual \
+  --hand-left inspire_dftp --hand-right allegro_v5 \
+  --allegro-retarget legacy-0818
+```
+
+### Linear thumb-tip mapping in direct mode
+
+Allegro V5 `direct` defaults to `--allegro-thumb-distal-mapping linear` to map
+MANUS `ThumbDIPStretch` degrees 1:1 to the last thumb joint angle. Only action
+index 15 (`thumb_distal`) changes. Existing physical limits (-0.09 to 1.8 rad)
+remain active. Transform-only input uses the signed local x rotation of
+`thumb_proximal` to `thumb_distal`. This option leaves `legacy-0818`, DexPilot
+and other hand models unchanged.
+
+Select `--allegro-thumb-distal-mapping sine` to restore the previous ergonomic curve
+`1.2 * 1.65 * sin(radians(ThumbDIPStretch))`, clipped to the same limits.
+Both capture and the simulation UI accept the same option:
+
+```bash
+python -m paradex.retargetor.experiment.allegro_retargeter_alignment_ui \
+  --live --simulate --hand allegro_v5 \
+  --allegro-thumb-distal-mapping linear
+```
+
+Capture and the simulation UI use linear mapping when the curve option is
+omitted. `--allegro-retarget direct` remains the default retargeter.

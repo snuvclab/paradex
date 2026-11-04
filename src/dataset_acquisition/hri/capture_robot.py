@@ -9,19 +9,28 @@ from pathlib import Path
 import numpy as np
 from threading import Event
 
+PROJECT_ROOT = Path(__file__).resolve().parents[3]
+if str(PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(PROJECT_ROOT))
+
 # import chime
 # chime.theme('pokemon')
 
 from paradex.dataset_acqusition.capture import CaptureSession
 from paradex.utils.path import shared_dir
 from paradex.utils.file_io import find_latest_index
-from paradex.utils.keyboard_listener import listen_keyboard
-from paradex.utils.system import get_pc_list
+from paradex.dataset_acqusition.text_annotation import CaptureKeyboard
+from paradex.utils.system import get_pc_list, network_info
 from paradex.io.robot_controller.inspire_f1_tactile_plotter import InspireF1RealtimeTactilePlotter
 from paradex.io.streamdeck_pedal import MiddlePedalState
 
 EXCLUDED_PCS = {}
 camera_pc_list = [pc for pc in get_pc_list() if pc not in EXCLUDED_PCS]
+# Physical ports belong to the machine configuration, not the retargeting side.
+# Keep the existing layout as the fallback for machines without side settings.
+inspire_network = network_info.get('inspire_ip', {})
+inspire_left_network = inspire_network.get('left', {})
+inspire_right_network = inspire_network.get('right', {})
 
 parser = argparse.ArgumentParser()
 
@@ -78,17 +87,31 @@ parser.add_argument(
     help='Disable the timestamp monitor connection.',
 )
 parser.set_defaults(timestamp=True)
+parser.add_argument(
+    '--profile-startup', action='store_true',
+    help='Print initialization stage names and elapsed seconds for cameras, arms, hands, and teleop.',
+)
 parser.add_argument('--arm', type=str, default="xarm",
                     help="Arm controller name. Use 'none' (or empty) to disable arm control.")
 parser.add_argument('--hand', type=str, default="allegro_v5",
-                    help="Hand controller/retargetor name. Use 'none' for arm-only teleop; 'allegro_v5' with --allegro-retarget direct|dexpilot; 'wuji' for optimization, 'wuji_direct' for direct mapping, or 'wuji_hybrid' for opt thumb + direct fingers.")
+                    help="Hand controller/retargetor name. Use 'none' for arm-only teleop; 'allegro_v5' with --allegro-retarget direct|dexpilot|legacy-0818; 'wuji' for optimization, 'wuji_direct' for direct mapping, or 'wuji_hybrid' for opt thumb + direct fingers.")
+parser.add_argument('--hand-left', '--hand_left', default=None,
+                    help="Left hand controller/retargetor (bimanual only). Defaults to --hand; use 'none' to disable.")
+parser.add_argument('--hand-right', '--hand_right', default=None,
+                    help="Right hand controller/retargetor (bimanual only). Defaults to --hand; use 'none' to disable.")
 parser.add_argument(
-    '--allegro-retarget', choices=['direct', 'dexpilot'], default='direct',
-    help='Allegro V5: direct MANUS angles (default), or DexPilot fingertip optimization (right hand).',
+    '--allegro-retarget', choices=['direct', 'dexpilot', 'legacy-0818'], default='direct',
+    help='Allegro V5 only: direct MANUS angles (default), dexpilot optimization (right hand), or legacy-0818 mapping from fe18720cf.',
 )
-parser.add_argument('--capture_root', type=str, default="2026_miyungpa_retry")
+parser.add_argument('--allegro-thumb-distal-mapping', choices=['sine', 'linear'], default='linear',
+                    help='Allegro V5 direct only: linear maps MANUS DIP degrees 1:1 with joint limits (default); sine restores the previous thumb-tip curve.')
+parser.add_argument('--capture_root', type=str, default="snapgrasp")
 parser.add_argument('--name', type=str, required=True)
-parser.add_argument('--tactile', action="store_true")
+tactile_group = parser.add_mutually_exclusive_group()
+tactile_group.add_argument('--tactile', dest='tactile', action='store_true', default=None,
+                           help='Record hand tactile data (default: enabled for Allegro V5).')
+tactile_group.add_argument('--no-tactile', dest='tactile', action='store_false',
+                           help='Disable tactile recording.')
 parser.add_argument('--ip', action="store_true")
 parser.add_argument(
     '--allegro-command-rate-hz',
@@ -97,7 +120,8 @@ parser.add_argument(
     help=(
         'Maximum live target-update rate for Allegro V5 hands. Defaults to '
         '30 Hz, matching the Allegro alignment experiment; the driver holds '
-        'the latest target between updates.'
+        'the latest target between updates. Use 0 to disable this capture '
+        'target-update limit; the driver publishing rate is unchanged.'
     ),
 )
 parser.add_argument(
@@ -114,22 +138,22 @@ parser.add_argument(
 )
 parser.add_argument(
     '--inspire-right-interface',
-    default='enp8s0f1',
+    default=inspire_right_network.get('interface', 'enp8s0f1'),
     help='Network interface for the right Inspire Modbus TCP hand.',
 )
 parser.add_argument(
     '--inspire-right-ip',
-    default='192.168.12.210',
+    default=inspire_right_network.get('ip', '192.168.12.210'),
     help='IP address for the right Inspire Modbus TCP hand.',
 )
 parser.add_argument(
     '--inspire-left-interface',
-    default='enp8s0f3',
+    default=inspire_left_network.get('interface', 'enp8s0f3'),
     help='Network interface for the left Inspire Modbus TCP hand.',
 )
 parser.add_argument(
     '--inspire-left-ip',
-    default='192.168.11.210',
+    default=inspire_left_network.get('ip', '192.168.11.210'),
     help='IP address for the left Inspire Modbus TCP hand.',
 )
 def _inspire_force_limits(text):
@@ -195,7 +219,13 @@ parser.add_argument(
     default=1000.0,
     help='Raw tactile magnitude represented by the maximum arrow length.',
 )
-parser.add_argument('--xarm-servo-api', choices=["cartesian_aa", "angle_j"], default="cartesian_aa")
+parser.add_argument('--vive-arm-smoothing-ms', type=float, default=0,
+                    help='VIVE arm position/rotation smoothing time constant in ms (default 80; 0 disables).')
+parser.add_argument('--xarm-servo-api' , choices=["cartesian_aa", "angle_j"], default="cartesian_aa")
+parser.add_argument('--teleop-control-mode', choices=['split', 'shared'], default='split',
+                    help='Arm/hand target loops: independent threads and input freshness (default); shared keeps the previous loop.')
+parser.add_argument('--teleop-receiver-mode', choices=['split', 'shared'], default='split',
+                    help='VIVE/MANUS callbacks: split uses separate nodes/executor threads (default); shared uses one thread for comparison.')
 parser.add_argument(
     '--scale', '--hand-scale',
     dest='hand_scale',
@@ -221,12 +251,32 @@ def _normalize_optional_name(name):
 
 args.arm = _normalize_optional_name(args.arm)
 args.hand = _normalize_optional_name(args.hand)
-if args.allegro_retarget == 'dexpilot' and (
-    args.hand != 'allegro_v5' or args.hand_side != 'right'
+if args.hand_side != 'bimanual' and (
+    args.hand_left is not None or args.hand_right is not None
 ):
-    parser.error('--allegro-retarget dexpilot requires --hand allegro_v5 --hand-side right.')
-if args.allegro_command_rate_hz <= 0.0:
-    parser.error('--allegro-command-rate-hz must be positive.')
+    parser.error('--hand-left and --hand-right require --hand-side bimanual.')
+if args.hand_side == 'bimanual':
+    args.hand_left = _normalize_optional_name(
+        args.hand if args.hand_left is None else args.hand_left
+    )
+    args.hand_right = _normalize_optional_name(
+        args.hand if args.hand_right is None else args.hand_right
+    )
+    # Resolve defaults here so an explicit 'none' cannot fall back to --hand.
+    session_hand_kwargs = dict(hand=None, hand_left=args.hand_left, hand_right=args.hand_right)
+    active_hands = {'left': args.hand_left, 'right': args.hand_right}
+else:
+    session_hand_kwargs = dict(hand=args.hand)
+    active_hands = {args.hand_side: args.hand}
+if args.tactile is None:
+    args.tactile = 'allegro_v5' in active_hands.values()
+if args.allegro_retarget == 'dexpilot' and (
+    active_hands.get('right') != 'allegro_v5'
+    or active_hands.get('left') == 'allegro_v5'
+):
+    parser.error('--allegro-retarget dexpilot requires a right Allegro V5 hand and no left Allegro V5 hand.')
+if not np.isfinite(args.allegro_command_rate_hz) or args.allegro_command_rate_hz < 0.0:
+    parser.error('--allegro-command-rate-hz must be finite and nonnegative (0 disables the limit).')
 if args.camera_preview_port <= 0:
     parser.error('--camera-preview-port must be positive.')
 if args.camera_preview_refresh_interval <= 0.0:
@@ -237,6 +287,9 @@ if args.allegro_visualization_rate_hz <= 0.0:
     parser.error('--allegro-visualization-rate-hz must be positive.')
 if args.allegro_tactile_display_max <= 0.0:
     parser.error('--allegro-tactile-display-max must be positive.')
+
+if not np.isfinite(args.vive_arm_smoothing_ms) or not 0 <= args.vive_arm_smoothing_ms <= 1000:
+    parser.error('--vive-arm-smoothing-ms must be finite and in [0, 1000]')
 
 camera_enabled = args.camera_mode != 'off'
 camera_preview_enabled = args.camera_mode == 'preview'
@@ -266,7 +319,7 @@ grasp_yes_event = Event()
 grasp_no_event = Event()
 events = {"save": save_event, "stop": stop_event, "exit": exit_event}
 
-listen_keyboard(
+capture_keyboard = CaptureKeyboard(
     {
         "c": save_event,
         "q": exit_event,
@@ -275,6 +328,8 @@ listen_keyboard(
         "n": grasp_no_event,
     }
 )
+capture_keyboard.start()
+atexit.register(capture_keyboard.close)
 print("Keyboard control: c=start capture, s=stop capture, q=exit, y=grasp success, n=grasp fail")
 print("In keyboard_control mode, gesture states 2/3 do not control session start/stop/exit.")
 
@@ -283,30 +338,29 @@ pedal_state = MiddlePedalState() if args.pedal or args.hand_side == "bimanual" e
 if pedal_state is not None:
     atexit.register(pedal_state.close)
 
-inspire_bimanual = (
-    args.hand in ("inspire", "inspire_dftp")
-    and args.hand_side == "bimanual"
-)
+inspire_sides = [
+    side for side, hand in active_hands.items()
+    if args.hand_side in ('left', 'bimanual') and hand in ('inspire', 'inspire_dftp')
+]
 hand_kwargs = None
-if inspire_bimanual:
-    hand_kwargs = {
-        "right": {
-            "interface": args.inspire_right_interface,
-            "host": args.inspire_right_ip,
-            "force_limits": args.inspire_right_force_limits,
-        },
-        "left": {
-            "interface": args.inspire_left_interface,
-            "host": args.inspire_left_ip,
-            "force_limits": args.inspire_left_force_limits,
-        },
+if inspire_sides:
+    inspire_hand_kwargs = {
+        side: {
+            "interface": getattr(args, f'inspire_{side}_interface'),
+            "host": getattr(args, f'inspire_{side}_ip'),
+            "force_limits": getattr(args, f'inspire_{side}_force_limits'),
+        }
+        for side in inspire_sides
     }
-    print(
-        "Bimanual Inspire Modbus TCP: "
-        f"right={args.inspire_right_ip} via {args.inspire_right_interface} "
-        f"force={args.inspire_right_force_limits}, "
-        f"left={args.inspire_left_ip} via {args.inspire_left_interface} "
-        f"force={args.inspire_left_force_limits}"
+    for side, settings in inspire_hand_kwargs.items():
+        print(
+            f"Inspire Modbus TCP: {side}={settings['host']} "
+            f"via {settings['interface']} force={settings['force_limits']}"
+        )
+    hand_kwargs = (
+        inspire_hand_kwargs
+        if args.hand_side == 'bimanual'
+        else inspire_hand_kwargs[args.hand_side]
     )
 
 try:
@@ -314,14 +368,15 @@ try:
         camera=camera_enabled,
         realsense=False,
         arm=args.arm,
-        hand=args.hand,
+        **session_hand_kwargs,
         teleop=args.device,
         hand_side=args.hand_side,
         events=events,
         tactile=args.tactile or allegro_realtime_visualization,
-        ip=args.ip or inspire_bimanual,
+        ip=args.ip or bool(inspire_sides),
         hand_kwargs=hand_kwargs,
         timestamp=args.timestamp,
+        profile_startup=args.profile_startup,
         camera_pc_list=camera_pc_list,
         arm_kwargs={"servo_api": args.xarm_servo_api} if args.arm == "xarm" else None,
         hand_scale=args.hand_scale,
@@ -329,14 +384,19 @@ try:
         inspire_thumb_bend_weight=args.inspire_thumb_bend_weight,
         inspire_thumb_full_bend_deg=args.inspire_thumb_full_bend_deg,
         allegro_retarget=args.allegro_retarget,
+        allegro_thumb_distal_mapping=args.allegro_thumb_distal_mapping,
         hand_command_rate_hz=(
             args.allegro_command_rate_hz
-            if args.hand == 'allegro_v5'
+            if 'allegro_v5' in active_hands.values() and args.allegro_command_rate_hz > 0.0
             else None
         ),
         allegro_teleop_diagnostic_path=allegro_teleop_diagnostic_path,
         use_vive=args.use_vive,
-        require_left_control=args.use_vive and not unimanual_pedal,
+        teleop_receiver_mode=args.teleop_receiver_mode,
+        teleop_control_mode=args.teleop_control_mode,
+        vive_arm_smoothing_tau_s=args.vive_arm_smoothing_ms / 1000.0,
+        require_left_control=(args.use_vive and not unimanual_pedal and args.hand_side != 'left'
+                              and any(name is not None for name in active_hands.values())),
     )
 except Exception:
     if pedal_state is not None:
@@ -467,7 +527,8 @@ try:
             integrity_report = validate_immediate_capture(
                 episode_abs_path,
                 arm_enabled=args.arm is not None,
-                hand_enabled=args.hand is not None,
+                hand_enabled=any(hand is not None for hand in active_hands.values()),
+                hand_sides=[side for side, hand in active_hands.items() if hand is not None],
                 bimanual=args.hand_side == "bimanual",
                 teleop_enabled=args.device is not None,
                 camera_enabled=args.camera_mode != "off",
@@ -481,6 +542,10 @@ try:
                 f"Immediate integrity check could not run: {exc}",
                 file=sys.stderr,
             )
+
+        capture_keyboard.annotate(
+            episode_abs_path, last_idx, loop_callback=refresh_guis,
+        )
 
         save_event.clear()
         stop_event.clear()
@@ -533,7 +598,10 @@ try:
 
         if state == "exit":
             break
+except KeyboardInterrupt:
+    exit_event.set()
 finally:
+    capture_keyboard.close()
     print("Exiting teleoperation recording.")
     if camera_preview is not None:
         camera_preview.close()

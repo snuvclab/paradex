@@ -1,5 +1,6 @@
 import time
 import os
+import json
 import numpy as np
 from threading import Thread, Event, Lock
 
@@ -49,6 +50,19 @@ class _StateReceiverNode(Node):
 
     def _tactile_cb(self, msg: Int32MultiArray):
         now = time.perf_counter()
+        tactile = np.asarray(msg.data, dtype=np.int32)
+        # Independent packet log: no duplication at command ticks, including while
+        # teleop/publishing is paused. Int32MultiArray has no sensor timestamp.
+        with self._shared.lock:
+            data = self._shared.data
+            if self._shared.save_event.is_set() and data is not None and "tactile_raw" in data:
+                if tactile.size and (not data["tactile_raw"] or tactile.shape == data["tactile_raw"][0].shape):
+                    data["tactile_raw"].append(tactile.copy())
+                    data["tactile_time"].append(time.time())
+                    data["tactile_monotonic_time"].append(now)
+                else:
+                    self._shared.tactile_malformed += 1
+                    return
         if now - self._last_tactile_t < RECV_MIN_INTERVAL:
             return
         self._last_tactile_t = now
@@ -152,14 +166,15 @@ def _publish_loop(shared, pub_cmd, exit_event, command_paused_event, get_clock):
             pub_cmd.publish(msg)
             with shared.lock:
                 shared.last_published_action = action.copy()
-            if shared.save_event.is_set():
-                shared.data["action"].append(action.copy())
-                shared.data["time"].append(time.time())
-                shared.data["position"].append(joint_value.copy())
-                shared.data["velocity"].append(joint_velocity.copy())
-                shared.data["effort"].append(joint_effort.copy())
-                if "tactile" in shared.data and tactile is not None:
-                    shared.data["tactile"].append(tactile)
+            with shared.lock:
+                if shared.save_event.is_set():
+                    shared.data["action"].append(action.copy())
+                    shared.data["time"].append(time.time())
+                    shared.data["position"].append(joint_value.copy())
+                    shared.data["velocity"].append(joint_velocity.copy())
+                    shared.data["effort"].append(joint_effort.copy())
+                    if "tactile" in shared.data and tactile is not None:
+                        shared.data["tactile"].append(tactile)
         sleep_for = period - (time.perf_counter() - t0)
         if sleep_for > 0:
             time.sleep(sleep_for)
@@ -185,6 +200,7 @@ class _Shared:
         # It lets callers reject an old contact reading instead of treating it
         # as a current contact.
         self.tactile_time = None
+        self.tactile_malformed = 0
         self.data = None
 
 
@@ -422,15 +438,37 @@ class AllegroController:
             "effort": [],
         }
         if self.tactile_enabled:
-            data["tactile"] = []
-        self._shared.data = data
-        self._shared.save_event.set()
+            data["tactile"] = []  # legacy command-sampled values, kept for compatibility
+            data["tactile_raw"] = []
+            data["tactile_time"] = []
+            data["tactile_monotonic_time"] = []
+        with self._shared.lock:
+            self._shared.data = data
+            self._shared.tactile_malformed = 0
+            self._shared.save_event.set()
 
     def stop(self):
-        self._shared.save_event.clear()
+        with self._shared.lock:
+            self._shared.save_event.clear()
+            data = self._shared.data
+            malformed = self._shared.tactile_malformed
         os.makedirs(self.capture_path, exist_ok=True)
-        for name, value in self._shared.data.items():
+        for name, value in data.items():
             np.save(os.path.join(self.capture_path, f"{name}.npy"), np.array(value))
+        if self.tactile_enabled:
+            count = len(data["tactile_raw"])
+            metadata = {
+                "topic": f'/{self.namespace}{TACTILE_SUFFIX}' if self.namespace else TACTILE_SUFFIX,
+                "samples": count, "malformed_packets": malformed,
+                "tactile_raw": "Independent received Int32MultiArray packets; sensor channel order unchanged",
+                "tactile_time": "Host receive Unix seconds (time.time); message has no sensor timestamp",
+                "tactile_monotonic_time": "Host receive perf_counter seconds",
+                "tactile": "Legacy command-sampled cache; use tactile_raw/time for synchronization",
+            }
+            with open(os.path.join(self.capture_path, "tactile_info.json"), "w") as handle:
+                json.dump(metadata, handle, indent=2)
+            if not count:
+                print("WARNING: no Allegro tactile packets recorded on " + metadata["topic"])
         self.capture_path = None
 
     def end(self):

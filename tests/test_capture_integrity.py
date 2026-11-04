@@ -1,6 +1,7 @@
 from pathlib import Path
 
 import numpy as np
+import pytest
 
 from paradex.dataset_acqusition.capture_integrity import (
     format_integrity_report,
@@ -79,3 +80,19 @@ def test_vive_mapping_payload_uses_leaf_sample_length(tmp_path):
     right_report = report["streams"]["teleop"]["files"]["right.npy"]
     assert right_report["length"] == 5
     assert right_report["mapping_keys"] == 2
+
+
+@pytest.mark.parametrize("hand_side", ["left", "right"])
+def test_bimanual_integrity_checks_only_enabled_hand_sides(tmp_path, hand_side):
+    _write_stream(tmp_path / "raw" / f"hand_{hand_side}")
+    report = validate_immediate_capture(
+        tmp_path,
+        arm_enabled=False,
+        bimanual=True,
+        hand_sides=[hand_side],
+        teleop_enabled=False,
+        camera_enabled=False,
+        timestamp_expected=False,
+    )
+    assert report["immediate_ok"]
+    assert set(report["streams"]) == {f"hand_{hand_side}"}

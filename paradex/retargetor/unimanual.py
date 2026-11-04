@@ -51,7 +51,7 @@ class Retargetor(): # Input is only from Xsens
                  hand_name_left=None, hand_name_right=None, hand_scale=1.0,
                  teleop_name=None, inspire_retarget="manus",
                  inspire_thumb_bend_weight=0.7, inspire_thumb_full_bend_deg=60.0,
-                 allegro_retarget="direct"):
+                 allegro_retarget="direct", allegro_thumb_distal_mapping="linear"):
         self.arm_name = arm_name
         self.teleop_name = teleop_name
         self.hand_name = hand_name
@@ -69,8 +69,10 @@ class Retargetor(): # Input is only from Xsens
         self.inspire_retarget = inspire_retarget
         self.inspire_thumb_bend_weight = inspire_thumb_bend_weight
         self.inspire_thumb_full_bend_deg = inspire_thumb_full_bend_deg
-        if allegro_retarget not in ("direct", "dexpilot"):
-            raise ValueError("allegro_retarget must be direct or dexpilot")
+        if allegro_retarget not in ("direct", "dexpilot", "legacy-0818"):
+            raise ValueError("allegro_retarget must be direct, dexpilot or legacy-0818")
+        if allegro_thumb_distal_mapping not in ("sine", "linear"):
+            raise ValueError("allegro_thumb_distal_mapping must be sine or linear")
         self.allegro_retarget = allegro_retarget
         left = hand_name_left if hand_name_left is not None else hand_name
         if allegro_retarget == "dexpilot" and (
@@ -107,6 +109,23 @@ class Retargetor(): # Input is only from Xsens
                 is_right=(self.hand_side != "Left"),
                 scale=self.hand_scale,
             )
+        if self.allegro_retarget == "direct" and allegro_thumb_distal_mapping == "sine":
+            sine_retargeter = partial(allegro_v5, thumb_distal_mapping="sine")
+            if self.hand_side == "Bimanual":
+                for side, name in (("Left", left), ("Right", right)):
+                    if name == "allegro_v5":
+                        self.hand_retargetor[side] = sine_retargeter
+            elif hand_name == "allegro_v5":
+                self.hand_retargetor = sine_retargeter
+        if self.allegro_retarget == "legacy-0818":
+            from paradex.retargetor.allegro_v5_legacy_0818 import allegro_v5 as legacy_allegro_v5
+
+            if self.hand_side == "Bimanual":
+                for side, name in (("Left", left), ("Right", right)):
+                    if name == "allegro_v5":
+                        self.hand_retargetor[side] = legacy_allegro_v5
+            elif hand_name == "allegro_v5":
+                self.hand_retargetor = legacy_allegro_v5
         if self.inspire_retarget == "dexpilot":
             self._use_inspire_dexpilot(hand_name, hand_name_left, hand_name_right)
         right_name = hand_name_right if hand_name_right is not None else hand_name
@@ -219,11 +238,21 @@ class Retargetor(): # Input is only from Xsens
         self.last_arm_pose[side] = robot_wrist_pose.copy()
         return robot_wrist_pose
 
-    def get_action(self, data):
+    def get_arm_action(self, data):
         if self.hand_side == "Bimanual":
-            arm_action_left = self._compute_wrist_pose("Left", data)
-            arm_action_right = self._compute_wrist_pose("Right", data)
+            return (self._compute_wrist_pose("Left", data),
+                    self._compute_wrist_pose("Right", data))
+        return self._compute_wrist_pose(self.hand_side, data)
 
+    def get_action(self, data):
+        arm_action = self.get_arm_action(data)
+        hand_action = self.get_hand_action(data)
+        if self.hand_side == "Bimanual":
+            return (*arm_action, *hand_action)
+        return arm_action, hand_action
+
+    def get_hand_action(self, data):
+        if self.hand_side == "Bimanual":
             rt_left = self.hand_retargetor.get("Left")
             rt_right = self.hand_retargetor.get("Right")
             ergonomics = data.get("ergonomics", {})
@@ -241,34 +270,29 @@ class Retargetor(): # Input is only from Xsens
             )
             hand_action_left = (
                 rt_left(data["Left"], **left_kwargs)
-                if rt_left is not None
+                if rt_left is not None and data.get("Left") is not None
                 else None
             )
             hand_action_right = (
                 rt_right(data["Right"], **right_kwargs)
-                if rt_right is not None
+                if rt_right is not None and data.get("Right") is not None
                 else None
             )
 
-            thumb_lock = self.inspire_retarget == "manus"
+            # Keep the left thumb's mapped bend independent of rotation, as
+            # in unimanual mode. The old >=750 rotation gate forced it open.
+            # Retain the existing right-hand policy.
             if (
-                thumb_lock
-                and left_name in _INSPIRE_HANDS
-                and hand_action_left[5] >= 750.0
-            ):
-                hand_action_left[4] = 1000.0
-            if (
-                thumb_lock
+                self.inspire_retarget == "manus"
                 and right_name in _INSPIRE_HANDS
+                and hand_action_right is not None
                 and hand_action_right[5] >= 750.0
             ):
                 hand_action_right[4] = 1000.0
 
-            return arm_action_left, arm_action_right, hand_action_left, hand_action_right
+            return hand_action_left, hand_action_right
         else:
-            arm_action = self._compute_wrist_pose(self.hand_side, data)
-
-            if self.hand_retargetor is not None:
+            if self.hand_retargetor is not None and data.get(self.hand_side) is not None:
                 kwargs = {}
                 if self.hand_name in ("inspire", "inspire_dftp", "allegro_v5"):
                     kwargs["ergonomics"] = data.get("ergonomics", {}).get(
@@ -281,7 +305,7 @@ class Retargetor(): # Input is only from Xsens
             else:
                 hand_action = None
 
-            return arm_action, hand_action
+            return hand_action
 
 
     def start(self, home_pose):
@@ -295,6 +319,10 @@ class Retargetor(): # Input is only from Xsens
         else:
             reset_hand_retargeter(self.hand_retargetor)
 
+        self.start_arm(home_pose)
+
+    def start_arm(self, home_pose):
+        """Rebase wrist tracking without touching concurrent hand retargeters."""
         if self.hand_side == "Bimanual":
             self.init_robot_pose = {
                 "Left": home_pose["Left"].copy(),

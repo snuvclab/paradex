@@ -1,5 +1,8 @@
 import json
-from types import SimpleNamespace
+import sys
+from queue import Queue
+from types import SimpleNamespace, ModuleType
+from unittest.mock import Mock
 import time
 from threading import Event, Lock
 
@@ -286,6 +289,20 @@ def test_manus_only_left_mode_does_not_require_right_glove_or_vive():
     assert set(data["ergonomics"]) == {"Left"}
 
 
+@pytest.mark.parametrize("pause_state", [0, 1, 2, 3])
+def test_manus_only_right_ignores_unsolicited_left_control(pause_state):
+    receiver = make_receiver_without_ros()
+    receiver.use_vive = False
+    receiver.require_left_control = False
+    receiver._pause_state = pause_state
+
+    assert receiver.get_data()["Right"] is not None
+    assert receiver.get_state() is None
+
+    receiver.require_left_control = True
+    assert receiver.get_state() == pause_state
+
+
 def test_get_data_suppresses_commands_when_any_input_is_stale():
     data = make_receiver_without_ros(sample_age=1.0).get_data()
 
@@ -368,3 +385,230 @@ def test_vive_arm_only_mode_does_not_require_a_robot_hand():
 
     assert hand_action is None
     np.testing.assert_allclose(wrist_action[:3, 3], [-0.1, 0.2, 0.3])
+
+
+@pytest.mark.parametrize("side", ["right", "bimanual"])
+def test_no_manus_streams_are_needed_for_vive_only_recording(side, tmp_path):
+    receiver = make_receiver_without_ros(hand_side=side)
+    receiver.use_vive = True
+    receiver.use_manus = False
+    receiver.require_left_control = False
+    receiver._manus_frames = {"Left": None, "Right": None}
+    receiver._manus_times = {"Left": None, "Right": None}
+    receiver.start(str(tmp_path))
+    data = receiver.get_data()
+    assert data["Right"] is not None
+    assert data["ergonomics"] == {}
+    receiver.stop()
+    assert not list(tmp_path.glob("manus*"))
+    assert len(np.load(tmp_path / "vive_right_time.npy")) == 1
+
+
+def test_vive_only_constructor_never_imports_or_subscribes_manus(monkeypatch):
+    node = Mock()
+    rclpy = ModuleType("rclpy")
+    rclpy.ok = lambda: True
+    rclpy.create_node = lambda _name: node
+    executor = ModuleType("rclpy.executors")
+    executor.SingleThreadedExecutor = Mock
+    qos = ModuleType("rclpy.qos")
+    qos.qos_profile_sensor_data = object()
+    geometry = ModuleType("geometry_msgs.msg")
+    geometry.PoseStamped = object
+    for name, module in {"rclpy": rclpy, "rclpy.executors": executor, "rclpy.qos": qos,
+                         "geometry_msgs.msg": geometry, "manus_ros2_msgs.msg": None}.items():
+        monkeypatch.setitem(sys.modules, name, module)
+    receiver = ViveManusROSReceiver(hand_side="bimanual", use_manus=False, require_left_control=False)
+    try:
+        topics = [call.args[1] for call in node.create_subscription.call_args_list]
+        assert topics == ["/vive_trackers/right_hand/pose", "/vive_trackers/left_hand/pose"]
+    finally:
+        receiver.end()
+
+
+@pytest.fixture
+def fake_ros_executors(monkeypatch):
+    nodes, executors = [], []
+
+    class FakeNode:
+        def __init__(self, name):
+            self.name = name
+            self.topics = []
+            self.destroyed = False
+            nodes.append(self)
+
+        def create_subscription(self, _type, topic, callback, _qos):
+            self.topics.append(topic)
+            return callback
+
+        def get_logger(self):
+            return Mock()
+
+        def destroy_node(self):
+            self.destroyed = True
+
+    class FakeExecutor:
+        def __init__(self):
+            self.jobs = Queue()
+            self.nodes = []
+            executors.append(self)
+
+        def add_node(self, node):
+            self.nodes.append(node)
+
+        def remove_node(self, node):
+            self.nodes.remove(node)
+
+        def spin(self):
+            while True:
+                job = self.jobs.get()
+                if job is None:
+                    return
+                job()
+
+        def shutdown(self):
+            self.jobs.put(None)
+
+    rclpy = ModuleType("rclpy")
+    rclpy.ok = lambda: True
+    rclpy.create_node = FakeNode
+    executor = ModuleType("rclpy.executors")
+    executor.SingleThreadedExecutor = FakeExecutor
+    qos = ModuleType("rclpy.qos")
+    qos.qos_profile_sensor_data = object()
+    geometry = ModuleType("geometry_msgs.msg")
+    geometry.PoseStamped = object
+    manus = ModuleType("manus_ros2_msgs.msg")
+    manus.ManusGlove = object
+    for name, module in {"rclpy": rclpy, "rclpy.executors": executor, "rclpy.qos": qos,
+                         "geometry_msgs.msg": geometry, "manus_ros2_msgs.msg": manus}.items():
+        monkeypatch.setitem(sys.modules, name, module)
+    return nodes, executors
+
+
+@pytest.mark.parametrize("mode,vive,manus,count", [
+    ("split", True, True, 2), ("shared", True, True, 1),
+    ("split", True, False, 1), ("split", False, True, 1),
+])
+def test_input_executor_routing_and_shutdown(fake_ros_executors, mode, vive, manus, count):
+    nodes, executors = fake_ros_executors
+    receiver = ViveManusROSReceiver(callback_mode=mode, use_vive=vive, use_manus=manus,
+                                    hand_side="bimanual", require_left_control=False)
+    try:
+        assert len(executors) == count
+        if count == 2:
+            assert nodes[0].topics == ["/vive_trackers/right_hand/pose", "/vive_trackers/left_hand/pose"]
+            assert nodes[1].topics == ["/manus_glove_0", "/manus_glove_1"]
+            assert receiver.spin_thread is not receiver.manus_spin_thread
+    finally:
+        receiver.end()
+    assert all(node.destroyed for node in nodes)
+    assert not receiver.spin_thread.is_alive()
+    assert receiver.manus_spin_thread is None or not receiver.manus_spin_thread.is_alive()
+
+
+@pytest.mark.parametrize("mode", ["split", "shared"])
+def test_stalled_manus_conversion_does_not_block_split_vive(fake_ros_executors, monkeypatch, mode):
+    from paradex.io.teleop.vive import receiver as module
+    entered, release, vive_received = Event(), Event(), Event()
+    original = module.manus_message_to_frame
+
+    def stalled_conversion(message):
+        entered.set()
+        assert release.wait(2)
+        return original(message)
+
+    monkeypatch.setattr(module, "manus_message_to_frame", stalled_conversion)
+    receiver = ViveManusROSReceiver(callback_mode=mode, require_left_control=False)
+    message = SimpleNamespace(pose=make_pose(), header=SimpleNamespace(frame_id="test"))
+
+    def vive_callback():
+        receiver._vive_callback(message, "Right")
+        vive_received.set()
+
+    try:
+        receiver.manus_executor.jobs.put(lambda: receiver._manus_callback(make_manus_message(), "/manus_glove_0"))
+        assert entered.wait(1)
+        receiver.executor.jobs.put(vive_callback)
+        assert vive_received.wait(.15) is (mode == "split")
+    finally:
+        release.set()
+        receiver.end()
+    assert vive_received.is_set()
+
+
+@pytest.mark.parametrize("enabled", ["Left", "Right"])
+def test_bimanual_ignores_missing_manus_on_disabled_hand(enabled, tmp_path):
+    receiver = make_receiver_without_ros(hand_side="bimanual")
+    receiver.manus_sides = (enabled,)
+    disabled = "Left" if enabled == "Right" else "Right"
+    receiver._manus_frames[disabled] = None
+    receiver._manus_times[disabled] = None
+    receiver.start(str(tmp_path))
+    data = receiver.get_data()
+    assert data["Left"] is not None and data["Right"] is not None
+    assert set(data["ergonomics"]) == {enabled}
+    assert set(data[disabled]) == {"wrist"}
+    receiver.stop()
+    assert not (tmp_path / f"manus_{disabled.lower()}_time.npy").exists()
+    assert len(np.load(tmp_path / f"manus_{enabled.lower()}_time.npy")) == 1
+
+
+@pytest.mark.parametrize("stale_source", ["vive", "manus"])
+def test_independent_control_snapshots_ignore_other_source_freshness(stale_source):
+    receiver = make_receiver_without_ros(hand_side="bimanual")
+    receiver.use_vive = receiver.use_manus = True
+    receiver.manus_sides = ("Left", "Right")
+    if stale_source == "vive":
+        receiver._vive_left_time = receiver._vive_right_time = None
+    else:
+        receiver._manus_times = {"Left": None, "Right": None}
+    arm_data, hand_data = receiver.get_arm_data(), receiver.get_hand_data()
+    for side in ("Left", "Right"):
+        assert (arm_data[side] is None) == (stale_source == "vive")
+        assert (hand_data[side] is None) == (stale_source == "manus")
+    # Synchronized recording retains its previous availability contract.
+    assert receiver.get_data()["Right"] is None
+
+
+def test_hand_snapshot_keeps_manus_wrist_and_active_side_only():
+    receiver = make_receiver_without_ros(hand_side="bimanual")
+    receiver.use_manus = True
+    receiver.manus_sides = ("Left",)
+    data = receiver.get_hand_data()
+    assert data["Right"] is None
+    np.testing.assert_array_equal(data["Left"]["wrist"], receiver._manus_frames["Left"]["wrist"])
+    data["Left"]["wrist"][:] = 0
+    assert receiver._manus_frames["Left"]["wrist"][3, 3] == 1
+
+
+def test_independent_hand_frame_preserves_mixed_hand_retargeting():
+    receiver = make_receiver_without_ros(hand_side="bimanual")
+    receiver.use_vive = receiver.use_manus = True
+    receiver.manus_sides = ("Left", "Right")
+    receiver._vive_right[:3, :3] = [[0, -1, 0], [1, 0, 0], [0, 0, 1]]
+    receiver._vive_right[:3, 3] = [0.5, -0.2, 0.7]
+    retargetor = Retargetor(
+        arm_name="xarm", hand_side="Bimanual", teleop_name="vive",
+        hand_name_left="inspire_dftp", hand_name_right="allegro_v5",
+    )
+    combined_data = receiver.get_data()
+    independent_data = receiver.get_hand_data()
+    # The minimal message fixture omits some angles required by robot hands.
+    for side in ("Left", "Right"):
+        values = {f"{finger}{joint}{kind}": 10.0
+                  for finger in ("Thumb", "Index", "Middle", "Ring", "Pinky")
+                  for joint in ("MCP", "PIP", "DIP")
+                  for kind in ("Stretch", "Spread")}
+        values.update({finger + "Spread": 5.0 for finger in ("Index", "Middle", "Ring")})
+        combined_data["ergonomics"][side] = values.copy()
+        independent_data["ergonomics"][side] = values.copy()
+    combined = retargetor.get_hand_action(combined_data)
+    independent = retargetor.get_hand_action(independent_data)
+    for actual, expected in zip(independent, combined):
+        np.testing.assert_allclose(actual, expected, atol=1e-8)
+    combined_data.pop("ergonomics")
+    independent_data.pop("ergonomics")
+    for actual, expected in zip(retargetor.get_hand_action(independent_data),
+                                retargetor.get_hand_action(combined_data)):
+        np.testing.assert_allclose(actual, expected, atol=1e-8)

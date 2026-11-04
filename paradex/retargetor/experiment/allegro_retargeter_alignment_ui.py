@@ -20,6 +20,7 @@ shows the URDF pose implied by the live MANUS retargeter output.
 from __future__ import annotations
 
 import argparse
+from functools import partial
 import json
 import shutil
 import sys
@@ -75,10 +76,14 @@ _MANUS_ERGONOMIC_FIELDS = (
 )
 
 
-def _make_retargeter(hand_name: str, mode: str):
+def _make_retargeter(hand_name: str, mode: str, thumb_distal_mapping: str = "linear"):
     """Build a UI-only retargeter without changing the capture pipeline."""
     if mode not in RETARGETER_MODES:
         raise ValueError(f"Unsupported Allegro alignment retargeter: {mode}")
+    if thumb_distal_mapping not in ("sine", "linear"):
+        raise ValueError("thumb_distal_mapping must be sine or linear")
+    if hand_name == "allegro_v5" and thumb_distal_mapping == "sine":
+        return partial(allegro_v5, thumb_distal_mapping="sine")
     return allegro_v5 if hand_name == "allegro_v5" else allegro
 
 
@@ -191,6 +196,7 @@ class AllegroRetargeterAlignmentStudio:
         manus_topics: tuple[str, ...] = DEFAULT_MANUS_TOPICS,
         hand_name: str = "allegro_v5",
         retargeter_mode: str = "direct",
+        allegro_thumb_distal_mapping: str = "linear",
     ):
         self.urdf_path = urdf_path.resolve()
         self.output_root = output_root
@@ -206,7 +212,8 @@ class AllegroRetargeterAlignmentStudio:
         self.manus_topics = tuple(manus_topics)
         self.hand_name = hand_name
         self.retargeter_mode = retargeter_mode
-        self.retargeter = _make_retargeter(hand_name, retargeter_mode)
+        self.allegro_thumb_distal_mapping = allegro_thumb_distal_mapping
+        self.retargeter = _make_retargeter(hand_name, retargeter_mode, allegro_thumb_distal_mapping)
         self.lock = threading.Lock()
         self._syncing_sliders = False
         self.capture_event = threading.Event()
@@ -541,7 +548,7 @@ class AllegroRetargeterAlignmentStudio:
         mode = str(mode)
         if mode == self.retargeter_mode:
             return
-        self.retargeter = _make_retargeter(self.hand_name, mode)
+        self.retargeter = _make_retargeter(self.hand_name, mode, getattr(self, "allegro_thumb_distal_mapping", "linear"))
         self.retargeter_mode = mode
         self.latest_manus_action = None
         if self.live:
@@ -1053,6 +1060,7 @@ class AllegroRetargeterAlignmentStudio:
             "robot": robot,
             "retargeter": {
                 "mode": self.retargeter_mode,
+                "thumb_distal_mapping": getattr(self, "allegro_thumb_distal_mapping", "linear"),
                 "function": _retargeter_function_name(
                     self.hand_name, self.retargeter_mode
                 ),
@@ -1198,6 +1206,10 @@ def parse_args() -> argparse.Namespace:
         help="UI retargeter mode; direct keeps the existing Allegro mapping.",
     )
     parser.add_argument(
+        "--allegro-thumb-distal-mapping", choices=("sine", "linear"), default="linear",
+        help="Allegro V5 direct thumb tip: linear 1:1 angle mapping (default) or previous sine curve",
+    )
+    parser.add_argument(
         "--use-vive",
         action="store_true",
         help="reparent MANUS frames using the right VIVE tracker (default: MANUS-only)",
@@ -1254,6 +1266,7 @@ def main() -> None:
             manus_topics=tuple(args.manus_topics or DEFAULT_MANUS_TOPICS),
             hand_name=args.hand,
             retargeter_mode=args.retargeter,
+            allegro_thumb_distal_mapping=args.allegro_thumb_distal_mapping,
         )
     else:
         sample_dir = args.open.resolve()

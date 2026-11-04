@@ -152,6 +152,7 @@ def validate_immediate_capture(
     *,
     arm_enabled=True,
     hand_enabled=True,
+    hand_sides=None,
     bimanual=False,
     teleop_enabled=True,
     camera_enabled=True,
@@ -181,6 +182,8 @@ def validate_immediate_capture(
 
     if hand_enabled:
         hand_names = ("hand_left", "hand_right") if bimanual else ("hand",)
+        if bimanual and hand_sides is not None:
+            hand_names = tuple(f"hand_{side}" for side in hand_sides)
         for name in hand_names:
             streams[name] = _check_stream(
                 raw_root / name,

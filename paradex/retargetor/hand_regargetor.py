@@ -1190,6 +1190,9 @@ _INSPIRE_THUMB_SECONDARY_GAIN = 0.8
 # Allegro V5) left the RH56 thumb at ~57% of its travel.
 _INSPIRE_DFTP_THUMB_STRETCH_FULL_DEG = 45.0
 _INSPIRE_DFTP_THUMB_STRETCH_GAIN = 1.0
+# Left MANUS thumb: keep distal curl independent of inward base rotation.
+_INSPIRE_LEFT_THUMB_CURL_FULL_DEG = 45.0
+_INSPIRE_LEFT_THUMB_OPPOSITION_FULL_DEG = 35.0
 
 
 def _open_to_closed_command(flexion_deg, range_deg):
@@ -1205,7 +1208,7 @@ def _inspire_thumb_secondary_fraction(flexion_deg):
     ) * (_INSPIRE_THUMB_SECONDARY_GAIN / 1000.0)
 
 
-def inspire_from_manus_ergonomics(ergonomics):
+def inspire_from_manus_ergonomics(ergonomics, is_right=True):
     """Map MANUS ergonomic angles to RH56 ANGLE_SET register order."""
     required = []
     for finger in ("Pinky", "Ring", "Middle", "Index"):
@@ -1235,6 +1238,19 @@ def inspire_from_manus_ergonomics(ergonomics):
             _INSPIRE_FINGER_ANGLE_RANGE_DEG,
         )
 
+    thumb_curl = ergonomics.get("ThumbDIPStretch", ergonomics.get("ThumbPIPStretch"))
+    if not is_right and thumb_curl is not None:
+        # Spread describes opposition, not distal curl. Using it for bend
+        # saturated the thumb before its tip could respond inside the palm.
+        command[4] = _open_to_closed_command(
+            thumb_curl, _INSPIRE_LEFT_THUMB_CURL_FULL_DEG,
+        )
+        command[5] = _open_to_closed_command(
+            ergonomics["ThumbMCPSpread"], _INSPIRE_LEFT_THUMB_OPPOSITION_FULL_DEG,
+        )
+        return command
+
+    # Preserve right-hand behavior and older payloads without thumb curl.
     command[4] = np.clip(
         (
             np.clip(
@@ -1271,7 +1287,7 @@ def inspire(
     ergonomics=None,
 ):
     if ergonomics is not None:
-        return inspire_from_manus_ergonomics(ergonomics)
+        return inspire_from_manus_ergonomics(ergonomics, is_right=is_right)
 
     inspire_angles = np.zeros(6)
 
@@ -1547,7 +1563,7 @@ def kistar(hand_pose_frame):
     return kistar_raw
 
 
-def _allegro_v5_raw_from_manus_ergonomics(ergonomics):
+def _allegro_v5_raw_from_manus_ergonomics(ergonomics, thumb_distal_mapping="linear"):
     """Convert named MANUS joint angles to the legacy raw-v5 action order.
 
     VIVE's MANUS stream contains stable per-joint ergonomics in degrees.  The
@@ -1624,10 +1640,12 @@ def _allegro_v5_raw_from_manus_ergonomics(ergonomics):
         ),
         _ALLEGRO_V5_PHYSICAL_UPPER[15],
     )
+    if thumb_distal_mapping == "linear":
+        action[15] = np.deg2rad(values["ThumbDIPStretch"])
     return _clip_allegro_v5_physical_action(action)
 
 
-def _allegro_v5_raw(hand_pose_frame, ergonomics=None):
+def _allegro_v5_raw(hand_pose_frame, ergonomics=None, thumb_distal_mapping="linear"):
     """Extract raw Allegro-v5 angles in retargeter action order.
 
     Prefer named MANUS ergonomics for VIVE teleoperation.  The transform
@@ -1635,7 +1653,7 @@ def _allegro_v5_raw(hand_pose_frame, ergonomics=None):
     MANUS sources that do not publish ergonomics.
     """
     if ergonomics is not None:
-        return _allegro_v5_raw_from_manus_ergonomics(ergonomics)
+        return _allegro_v5_raw_from_manus_ergonomics(ergonomics, thumb_distal_mapping=thumb_distal_mapping)
     allegro_angles = np.zeros(16)
     # for finger_id in range(4):
     #     for joint_id in range(4):
@@ -1689,11 +1707,13 @@ def _allegro_v5_raw(hand_pose_frame, ergonomics=None):
     for i, (parent_name, joint_name) in enumerate([("thumb_metacarpal", "thumb_proximal"),("thumb_proximal", "thumb_distal")]):
         rot_mat = np.linalg.inv(hand_pose_frame[parent_name][:3,:3]) @ hand_pose_frame[joint_name][:3,:3]
         allegro_angles[14+i] = rot_mat[2, 1] * 1.2
+        if i == 1 and thumb_distal_mapping == "linear":
+            allegro_angles[15] = np.arctan2(rot_mat[2, 1], rot_mat[1, 1])
 
     return _clip_allegro_v5_physical_action(allegro_angles)
 
 
-def allegro_v5(hand_pose_frame, ergonomics=None):
+def allegro_v5(hand_pose_frame, ergonomics=None, thumb_distal_mapping="linear"):
     """Retarget MANUS data through the raw-v5 action contract.
 
     VIVE teleoperation supplies named ergonomic joint angles, so the raw
@@ -1705,7 +1725,10 @@ def allegro_v5(hand_pose_frame, ergonomics=None):
     # one-sided angle branches that are sensitive to round-off introduced by
     # VIVE frame reparenting; named ergonomics avoid that ambiguity whenever
     # the glove publishes a complete payload.
-    return _allegro_v5_raw(hand_pose_frame, ergonomics=ergonomics)
+    if thumb_distal_mapping not in ("sine", "linear"):
+        raise ValueError("thumb_distal_mapping must be sine or linear")
+    return _allegro_v5_raw(hand_pose_frame, ergonomics=ergonomics,
+                         thumb_distal_mapping=thumb_distal_mapping)
     try:
         raw_action = _allegro_v5_raw(hand_pose_frame, ergonomics=ergonomics)
     except ValueError:

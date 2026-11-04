@@ -288,11 +288,13 @@ def _normalize_optional_name(name):
 
 
 class _PoseCommandLimiter:
-    def __init__(self, initial_pose, timestamp):
+    def __init__(self, initial_pose, timestamp, smoothing_tau_s=0.):
         self.last_sent_pose = np.asarray(initial_pose, dtype=float).copy()
         self.last_raw_pose = self.last_sent_pose.copy()
         self.last_sample_time = float(timestamp)
         self.rejected_count = 0
+        from paradex.dataset_acqusition.pose_smoothing import PoseSmoother
+        self.smoother = PoseSmoother(initial_pose, timestamp, smoothing_tau_s)
 
     def filter(self, candidate_pose, timestamp):
         candidate_pose = np.asarray(candidate_pose, dtype=float)
@@ -301,7 +303,11 @@ class _PoseCommandLimiter:
             max(timestamp - self.last_sample_time, 0.0),
             _VIVE_MAX_COMMAND_DT_S,
         )
-        self.last_sample_time = timestamp
+        # Re-reading the same cached VIVE pose is not a new tracking sample.
+        # Measure the jump allowance from the previous changed pose, rather than
+        # the much faster teleop polling loop.
+        if not np.array_equal(candidate_pose, self.last_raw_pose):
+            self.last_sample_time = timestamp
 
         translation_delta = np.linalg.norm(
             candidate_pose[:3, 3] - self.last_raw_pose[:3, 3]
@@ -337,6 +343,7 @@ class _PoseCommandLimiter:
                 self.last_sent_pose[:3, :3] @ relative_rotation
             )
             self.last_sent_pose = filtered_pose
+            filtered_pose = self.smoother.filter(filtered_pose, timestamp)
             self.rejected_count = 0
         else:
             filtered_pose = None
@@ -383,45 +390,67 @@ class CaptureSession():
         inspire_thumb_bend_weight=0.7,
         inspire_thumb_full_bend_deg=60.0,
         allegro_retarget="direct",
+        vive_arm_smoothing_tau_s=0.08,
+        profile_startup=False,
+        teleop_receiver_mode="split",
+        teleop_control_mode="split",
+        allegro_thumb_distal_mapping="linear",
     ):
+        if teleop_control_mode not in ("split", "shared"):
+            raise ValueError("teleop_control_mode must be split or shared")
+        self.teleop_control_mode = teleop_control_mode
+        self.profile_startup = bool(profile_startup)
+        if teleop_receiver_mode not in ("split", "shared"):
+            raise ValueError("teleop_receiver_mode must be split or shared")
+        startup_started = time.monotonic()
+        self.vive_arm_smoothing_tau_s = float(vive_arm_smoothing_tau_s)
+        if not np.isfinite(self.vive_arm_smoothing_tau_s) or self.vive_arm_smoothing_tau_s < 0:
+            raise ValueError("vive_arm_smoothing_tau_s must be finite and nonnegative")
         arm = _normalize_optional_name(arm)
         hand = _normalize_optional_name(hand)
         hand_left = _normalize_optional_name(hand_left)
         hand_right = _normalize_optional_name(hand_right)
-        if allegro_retarget not in ("direct", "dexpilot"):
-            raise ValueError("allegro_retarget must be direct or dexpilot")
+        manus_sides = (
+            [side for side, name in (
+                ("Left", hand_left if hand_left is not None else hand),
+                ("Right", hand_right if hand_right is not None else hand),
+            ) if name is not None]
+            if hand_side == "bimanual"
+            else ([hand_side.title()] if hand is not None else [])
+        )
+        use_manus = bool(use_manus) and bool(manus_sides)
+        if teleop == "vive" and not use_vive and not use_manus:
+            raise ValueError("No teleop input: --hand None requires VIVE wrist tracking (remove --no-vive).")
+        if allegro_thumb_distal_mapping not in ("sine", "linear"):
+            raise ValueError("allegro_thumb_distal_mapping must be sine or linear")
+        if allegro_retarget not in ("direct", "dexpilot", "legacy-0818"):
+            raise ValueError("allegro_retarget must be direct, dexpilot or legacy-0818")
         if allegro_retarget == "dexpilot" and (
             (hand_side == "left" and hand == "allegro_v5")
             or (hand_side == "bimanual" and (hand_left or hand) == "allegro_v5")
         ):
             raise ValueError("Allegro V5 DexPilot currently supports the right hand only")
 
-        if teleop == "vive" and hand_side not in ("right", "bimanual"):
+        if teleop == "vive" and use_vive and hand_side == "left":
             raise ValueError(
-                "VIVE teleop supports --hand-side right or bimanual."
+                "VIVE wrist tracking supports --hand-side right or bimanual. "
+                "Use --no-vive for left-hand MANUS-only teleoperation."
             )
 
         if realsense:
             from paradex.io.camera_system.realsense_controller import realsense_controller
-            self.realsense = realsense_controller()
+            self.realsense = self._startup_call("realsense", realsense_controller)
         else:
             self.realsense = None
         
         if arm is None and hand is None and hand_left is None and hand_right is None and teleop is not None:
             raise ValueError("Teleop device requires at least one of arm or hand to be specified.")
         
+        self.camera = None
+        self.timestamp_monitor = None
+        self.sync_generator = None
         if camera:
-            self.camera = remote_camera_controller(name="dataset_acquisition", pc_list=camera_pc_list)
-            self.sync_generator = UTGE900(**network_info["signal_generator"]["param"])
-            self.timestamp_monitor = (
-                TimestampMonitor(**network_info["timestamp"]["param"])
-                if timestamp
-                else None
-            )
-        else:
-            self.camera = None
-            self.timestamp_monitor = None
-            self.sync_generator = None
+            self._initialize_camera_system(camera_pc_list, timestamp)
 
      
 
@@ -454,8 +483,10 @@ class CaptureSession():
         if require_left_control is None:
             # A left glove is only needed for the legacy gesture pause/control
             # path.  Manus-only hand teleoperation can run from one glove.
-            require_left_control = self.use_vive and self.use_manus
-        self.require_left_control = bool(require_left_control)
+            require_left_control = self.use_vive and self.use_manus and hand_side != "left"
+        self.require_left_control = bool(require_left_control) and self.use_manus
+        if hand_side == "bimanual" and "Left" not in manus_sides:
+            self.require_left_control = False
 
         if hand_side == "right":
             self.hand_side = "Right"
@@ -478,10 +509,12 @@ class CaptureSession():
                 right_kwargs = arm_kwargs.pop("right", arm_kwargs.copy())
                 left_kwargs.setdefault("namespace", "left")
                 right_kwargs.setdefault("namespace", "right")
-                self.arm_right = get_arm(arm, **right_kwargs)
-                self.arm_left = get_arm(arm, **left_kwargs)
+                self.arm_right = self._startup_call("right arm", get_arm, arm, **right_kwargs)
+                self.arm_left = self._startup_call("left arm", get_arm, arm, **left_kwargs)
             else:
-                self.arm = get_arm(arm, **arm_kwargs)
+                if hand_side == "left":
+                    arm_kwargs.setdefault("namespace", "left")
+                self.arm = self._startup_call(f"{hand_side} arm", get_arm, arm, **arm_kwargs)
         
         self.hand = None
         self.hand_left = None
@@ -509,7 +542,8 @@ class CaptureSession():
             }
             if left_name is not None:
                 self.hand_name_left = left_name
-                self.hand_left = _connect_capture_hand(
+                self.hand_left = self._startup_call(
+                    "left hand", _connect_capture_hand,
                     hand_name=left_name,
                     tactile=tactile,
                     ip=ip,
@@ -518,7 +552,8 @@ class CaptureSession():
                 )
             if right_name is not None:
                 self.hand_name_right = right_name
-                self.hand_right = _connect_capture_hand(
+                self.hand_right = self._startup_call(
+                    "right hand", _connect_capture_hand,
                     hand_name=right_name,
                     tactile=tactile,
                     ip=ip,
@@ -528,7 +563,8 @@ class CaptureSession():
         else:
             if hand is not None:
                 self.hand_name = hand
-                self.hand = _connect_capture_hand(
+                self.hand = self._startup_call(
+                    f"{hand_side} hand", _connect_capture_hand,
                     hand_name=hand,
                     tactile=tactile,
                     ip=ip,
@@ -543,14 +579,20 @@ class CaptureSession():
             if teleop == "xsens":
                 # if arm == "openarm":
                 from paradex.io.teleop.xsens.receiver import XSensReceiver
-                self.teleop_device = XSensReceiver(**network_info["xsens"]["param"])
+                self.teleop_device = self._startup_call(
+                    "teleop receiver", XSensReceiver, **network_info["xsens"]["param"]
+                )
             elif teleop == "vive":
                 from paradex.io.teleop.vive.receiver import ViveManusROSReceiver
-                self.teleop_device = ViveManusROSReceiver(
+                self.teleop_device = self._startup_call(
+                    "teleop receiver", ViveManusROSReceiver,
                     hand_side=hand_side,
                     require_left_control=self.require_left_control,
                     use_vive=self.use_vive,
+                    callback_mode=teleop_receiver_mode,
                     **({"use_manus": False} if not self.use_manus else {}),
+                    **({"manus_sides": manus_sides}
+                       if self.use_manus and hand_side == "bimanual" and len(manus_sides) == 1 else {}),
                 )
             else:
                 raise ValueError(f"Unsupported teleop device: {teleop}")
@@ -559,7 +601,8 @@ class CaptureSession():
             #     from paradex.io.teleop.oculus.receiver import OculusReceiver
             #     self.teleop_device = OculusReceiver()
             if arm != 'openarm':
-                self.retargetor = Retargetor(
+                self.retargetor = self._startup_call(
+                    "retargetor", Retargetor,
                     arm_name=arm,
                     hand_name=None if self.hand_action_provider is not None else hand,
                     hand_side=self.hand_side,
@@ -570,6 +613,7 @@ class CaptureSession():
                     inspire_thumb_bend_weight=inspire_thumb_bend_weight,
                     inspire_thumb_full_bend_deg=inspire_thumb_full_bend_deg,
                     allegro_retarget=allegro_retarget,
+                    allegro_thumb_distal_mapping=allegro_thumb_distal_mapping,
                     teleop_name=teleop,
                 )
                 self.state_extractor = HandStateExtractor()
@@ -587,13 +631,52 @@ class CaptureSession():
                 plot_refresh_interval=human_tactile_plot_refresh_interval,
                 plot_max_samples=human_tactile_plot_max_samples,
             )
-            self.human_tactile.connect()
+            self._startup_call("human tactile", self.human_tactile.connect)
             
         self.save_path = None
         self._camera_capture_started = False
         self._timestamp_monitor_started = False
         self._sync_generator_started = False
-            
+        if self.profile_startup:
+            print(f"[startup] session initialized in {time.monotonic() - startup_started:.3f}s", flush=True)
+
+    def _startup_call(self, stage, factory, *args, **kwargs):
+        if not self.profile_startup:
+            return factory(*args, **kwargs)
+        print(f"[startup] {stage}: starting", flush=True)
+        started = time.monotonic()
+        try:
+            result = factory(*args, **kwargs)
+        except BaseException:
+            print(f"[startup] {stage}: failed after {time.monotonic() - started:.3f}s", flush=True)
+            raise
+        status = "disabled" if result is None and stage.endswith(" hand") else "initialized"
+        print(f"[startup] {stage}: {status} in {time.monotonic() - started:.3f}s", flush=True)
+        return result
+
+    def _initialize_camera_system(self, camera_pc_list, timestamp):
+        """Connect recording hardware before any recorders or trigger are started."""
+        camera = self._startup_call(
+            "remote cameras", remote_camera_controller,
+            name="dataset_acquisition", pc_list=camera_pc_list,
+        )
+        try:
+            sync_generator = self._startup_call(
+                "sync generator", UTGE900, **network_info["signal_generator"]["param"]
+            )
+            timestamp_monitor = (
+                self._startup_call(
+                    "timestamp camera", TimestampMonitor, **network_info["timestamp"]["param"]
+                )
+                if timestamp else None
+            )
+        except BaseException:
+            camera.end()
+            raise
+        self.camera = camera
+        self.sync_generator = sync_generator
+        self.timestamp_monitor = timestamp_monitor
+
     def start(self, save_path): # Start recording on all sensors
         print("Starting new capture session, saving to:", save_path)
         self.save_path = save_path
@@ -764,6 +847,68 @@ class CaptureSession():
 
         self.hand_teleoperation_enabled = bool(enabled)
 
+    def _move_hands_if_due(self, hand_commands, *, teleop_data=None, state=None, command_allowed=lambda: True):
+        """Send a coherent hand target set at the configured UI-rate cap."""
+        if not hasattr(self, "_hands_waiting_for_feedback"):
+            self._hands_waiting_for_feedback = set()
+        if not getattr(self, "hand_teleoperation_enabled", True):
+            return
+        # The UI samples feedback and updates its target on a single 30 Hz
+        # command tick.  Do the rate check before acquiring the Allegro
+        # feedback lock, so CaptureSession's 10 ms loop cannot contend with
+        # the controller's 100 Hz command publisher between actual targets.
+        limiter = getattr(self, "_hand_command_limiter", None)
+        if limiter is not None and not limiter.is_due(time.monotonic()):
+            return
+        valid_commands = []
+        for hand_controller, action, hand_name in hand_commands:
+            if hand_controller is None or action is None:
+                continue
+            if _is_allegro_ui_aligned_hand(hand_name):
+                # The UI waits for real feedback before it replaces the
+                # driver's feedback-initialized hold target.  Preserve
+                # that safety boundary in capture as well.
+                try:
+                    feedback = hand_controller.get_data()
+                except Exception:
+                    continue
+                if _allegro_v5_feedback_hold_target(feedback) is None:
+                    if id(hand_controller) not in self._hands_waiting_for_feedback:
+                        state_topic = getattr(hand_controller, "state_topic", "joint_states")
+                        print(
+                            f"Waiting for {hand_name} feedback on {state_topic}; "
+                            "hand commands are held. Start the Allegro driver "
+                            "with the matching namespace.",
+                            flush=True,
+                        )
+                        self._hands_waiting_for_feedback.add(id(hand_controller))
+                    continue
+                self._hands_waiting_for_feedback.discard(id(hand_controller))
+                controller_target = retargeter_action_to_live_controller_qpos(
+                    action, hand_name
+                )
+                valid_commands.append(
+                    (hand_controller, action, controller_target, hand_name, feedback)
+                )
+                continue
+            valid_commands.append((hand_controller, action, action, hand_name, None))
+        if not valid_commands:
+            return
+        for hand_controller, retargeter_action, controller_target, command_hand_name, feedback in valid_commands:
+            if not command_allowed():
+                return
+            hand_controller.move(controller_target)
+            diagnostic_logger = getattr(self, "_allegro_teleop_diagnostic_logger", None)
+            if diagnostic_logger is not None and _is_allegro_ui_aligned_hand(command_hand_name):
+                diagnostic_logger.record(
+                    teleop_data=teleop_data,
+                    state=state,
+                    hand_name=command_hand_name,
+                    retargeter_action=retargeter_action,
+                    controller_target=controller_target,
+                    feedback=feedback,
+                )
+
     def teleop(
         self,
         session_events=None,
@@ -786,6 +931,14 @@ class CaptureSession():
 
         if session_events is None:
             session_events = self.events
+
+        if (getattr(self, "teleop_control_mode", "shared") == "split"
+                and getattr(self, "teleop_name", None) == "vive"):
+            from paradex.dataset_acqusition.split_control import run_split_teleop
+            return run_split_teleop(
+                self, session_events, state_policy, loop_callback,
+                bimanual_state_provider, unimanual_state_provider,
+            )
 
         chime.warning(sync=True)
         exit_counter = 0
@@ -814,6 +967,7 @@ class CaptureSession():
                     side: _PoseCommandLimiter(
                         home_pose[side],
                         limiter_start_time,
+                        smoothing_tau_s=getattr(self, "vive_arm_smoothing_tau_s", 0.08),
                     )
                     for side in ("Left", "Right")
                 }
@@ -821,6 +975,7 @@ class CaptureSession():
                 vive_arm_limiters[self.hand_side] = _PoseCommandLimiter(
                     home_pose,
                     limiter_start_time,
+                    smoothing_tau_s=getattr(self, "vive_arm_smoothing_tau_s", 0.08),
                 )
 
         def move_arm_if_safe(side, arm_controller, wrist_pose):
@@ -844,53 +999,8 @@ class CaptureSession():
                     f"rotation={rotation_delta_deg:.1f} deg"
                 )
 
-        def move_hands_if_due(hand_commands, *, teleop_data=None, state=None):
-            """Send a coherent hand target set at the configured UI-rate cap."""
-            if not getattr(self, "hand_teleoperation_enabled", True):
-                return
-            # The UI samples feedback and updates its target on a single 30 Hz
-            # command tick.  Do the rate check before acquiring the Allegro
-            # feedback lock, so CaptureSession's 10 ms loop cannot contend with
-            # the controller's 100 Hz command publisher between actual targets.
-            limiter = getattr(self, "_hand_command_limiter", None)
-            if limiter is not None and not limiter.is_due(time.monotonic()):
-                return
-            valid_commands = []
-            for hand_controller, action, hand_name in hand_commands:
-                if hand_controller is None or action is None:
-                    continue
-                if _is_allegro_ui_aligned_hand(hand_name):
-                    # The UI waits for real feedback before it replaces the
-                    # driver's feedback-initialized hold target.  Preserve
-                    # that safety boundary in capture as well.
-                    try:
-                        feedback = hand_controller.get_data()
-                    except Exception:
-                        continue
-                    if _allegro_v5_feedback_hold_target(feedback) is None:
-                        continue
-                    controller_target = retargeter_action_to_live_controller_qpos(
-                        action, hand_name
-                    )
-                    valid_commands.append(
-                        (hand_controller, action, controller_target, hand_name, feedback)
-                    )
-                    continue
-                valid_commands.append((hand_controller, action, action, hand_name, None))
-            if not valid_commands:
-                return
-            for hand_controller, retargeter_action, controller_target, command_hand_name, feedback in valid_commands:
-                hand_controller.move(controller_target)
-                diagnostic_logger = getattr(self, "_allegro_teleop_diagnostic_logger", None)
-                if diagnostic_logger is not None and _is_allegro_ui_aligned_hand(command_hand_name):
-                    diagnostic_logger.record(
-                        teleop_data=teleop_data,
-                        state=state,
-                        hand_name=command_hand_name,
-                        retargeter_action=retargeter_action,
-                        controller_target=controller_target,
-                        feedback=feedback,
-                    )
+        self._hands_waiting_for_feedback = set()
+        move_hands_if_due = self._move_hands_if_due
 
         arm_deadman_was_enabled = None
         right_hand_hold_target = None
@@ -989,7 +1099,8 @@ class CaptureSession():
                             arm_home_pose = self.arm.get_data()["position"]
                             self.retargetor.start(arm_home_pose)
                             vive_arm_limiters[self.hand_side] = _PoseCommandLimiter(
-                                arm_home_pose, time.monotonic()
+                                arm_home_pose, time.monotonic(),
+                                smoothing_tau_s=getattr(self, "vive_arm_smoothing_tau_s", 0.08),
                             )
                         wrist_pose, hand_action = self.retargetor.get_action(data)
                         if hand_action_provider is not None:

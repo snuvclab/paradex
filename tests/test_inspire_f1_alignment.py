@@ -476,7 +476,7 @@ def test_allegro_v5_raw_uses_full_manus_joint_angles_for_vive():
             * 1.78,
             31.0 / 75.0 * 1.78,
             1.65 * 1.2 * np.sin(np.deg2rad(30.0)),
-            1.65 * 1.2 * np.sin(np.deg2rad(60.0)),
+            np.deg2rad(60.0),
         ]
     )
     expected[12] *= 2.0
@@ -499,7 +499,7 @@ def test_allegro_v5_raw_uses_full_manus_joint_angles_for_vive():
 
     saturated = dict(ergonomics, ThumbPIPStretch=90.0, ThumbDIPStretch=90.0)
     saturated_action = _allegro_v5_raw_from_manus_ergonomics(saturated)
-    np.testing.assert_allclose(saturated_action[14:16], [1.9, 1.8])
+    np.testing.assert_allclose(saturated_action[14:16], [1.9, np.deg2rad(90.0)])
 
     open_thumb = _allegro_v5_raw_from_manus_ergonomics(
         dict(ergonomics, ThumbMCPSpread=0.0)
